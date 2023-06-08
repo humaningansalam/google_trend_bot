@@ -167,7 +167,7 @@ if __name__ == "__main__":
     print(scheduled_time2)
     
     #print(datetime.now().year, datetime.now().month, datetime.now().day, 10, 0, 0, tzinfo=KST)
-    bot_url = "https://hooks.slack.com/services/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"
+    bot_url = ""
 
     schedule.every(10).minutes.do(send_slack_message, bot_url, "now").tag("now_send")
     #schedule.every().day.at(scheduled_time1.strftime('%H:%M')).do(send_slack_message, bot_url, "before").tag("before_send")
