@@ -34,7 +34,7 @@ def get_now_google_trand():
         url = "https://trends.google.co.kr/trends/trendingsearches/daily?geo=KR&hl=ko"
         browser.get(url)
 
-        browser.implicitly_wait(10)
+        browser.implicitly_wait(60)
 
         browser = browser.find_elements(By.CLASS_NAME, "feed-list-wrapper")
 
