@@ -29,41 +29,44 @@ def get_now_google_trand():
     day = str(server_now.day)+"일"
 
     #with webdriver.Chrome() as browser:
-    with webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options) as browser:
+    try:
+        with webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options) as browser:
 
-        url = "https://trends.google.co.kr/trends/trendingsearches/daily?geo=KR&hl=ko"
-        browser.get(url)
+            url = "https://trends.google.co.kr/trends/trendingsearches/daily?geo=KR&hl=ko"
+            browser.get(url)
 
-        browser.implicitly_wait(60)
+            browser.implicitly_wait(60)
 
-        browser = browser.find_elements(By.CLASS_NAME, "feed-list-wrapper")
+            browser = browser.find_elements(By.CLASS_NAME, "feed-list-wrapper")
 
-        for feed in browser: 
-            feed_time = (feed.find_element(By.CLASS_NAME, "content-header-title").text).split(" ")[2]
-            if feed_time == day:
-                feed_find = feed.find_elements(By.CLASS_NAME, "md-list-block")
-                break;
+            for feed in browser: 
+                feed_time = (feed.find_element(By.CLASS_NAME, "content-header-title").text).split(" ")[2]
+                if feed_time == day:
+                    feed_find = feed.find_elements(By.CLASS_NAME, "md-list-block")
+                    break;
 
-        print(feed_find)
-        if len(feed_find) == 0:
-            pass
-        
-        else:
-            for feed in feed_find: 
-                title = feed.find_element(By.CLASS_NAME, "title").text
-                
-                if title in trand_list:
-                    pass
-                else:
-                    content = feed.find_element(By.CLASS_NAME, "summary-text").text
-                    url = feed.find_element(By.TAG_NAME, "feed-item").get_attribute("share-url")
-                    info = feed.find_element(By.CLASS_NAME, "source-and-time").get_attribute("title")
-                    feed_list.append('{} \n{} \n{} \n{}'.format(title, content, url, info))
-                    trand_list.append(title)
+            print(feed_find)
+            if len(feed_find) == 0:
+                pass
+            
+            else:
+                for feed in feed_find: 
+                    title = feed.find_element(By.CLASS_NAME, "title").text
+                    
+                    if title in trand_list:
+                        pass
+                    else:
+                        content = feed.find_element(By.CLASS_NAME, "summary-text").text
+                        url = feed.find_element(By.TAG_NAME, "feed-item").get_attribute("share-url")
+                        info = feed.find_element(By.CLASS_NAME, "source-and-time").get_attribute("title")
+                        feed_list.append('{} \n{} \n{} \n{}'.format(title, content, url, info))
+                        trand_list.append(title)
+
+    except Exception as e:   
+        print('예외', e)
 
 
-
-        return feed_list
+    return feed_list
 
 # %%
 def send_slack_message(bot_url, day):
