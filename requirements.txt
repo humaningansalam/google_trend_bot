@@ -1,0 +1,5 @@
+pytz==2023.3.post1
+requests==2.31.0      
+schedule==1.2.1       
+selenium==4.16.0 
+webdriver-manager==4.0.1

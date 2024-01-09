@@ -3,6 +3,7 @@ import requests #url로 요청을 보내는 모듈(슬렉)
 import json #클라이언트-서버가 통신하는 규율, 규격
 import time
 import schedule
+import os
 from datetime import datetime, timedelta
 from pytz import timezone
 
@@ -16,7 +17,7 @@ chrome_options.add_argument('--headless')
 chrome_options.add_argument('--no-sandbox')
 chrome_options.add_argument('--disable-dev-shm-usage')
 
-
+bot_url = os.getenv('SLACK_WEBHOOK', 'default_url')
 # %%
 def get_now_google_trand():
     
@@ -77,7 +78,6 @@ def send_slack_message(bot_url, day):
 
     if len(feed_list) == 0:
         pass
-        
     else:
         for feed in feed_list:
             payload = {
@@ -105,31 +105,48 @@ def reset_trand():
     global trand_list
     trand_list = []
 
+
+def job():
+    global now
+    global reset_done
+    global bot_url
+
+    if now.hour >= 8 and now.hour < 24:
+        send_slack_message(bot_url, "now")
+        reset_done = False
+
+def reset_job():
+    global now
+    global reset_done
+
+    if now.hour == 0:
+        if not reset_done:
+            reset_trand()
+            reset_done = True
+
+
+
 # %%
 if __name__ == "__main__":
 
     global trand_list
     global server_now
-    trand_list = []
+    global now
+    global reset_done
 
+    trand_list = []
+    reset_done = False
 
     KST = timezone('Asia/Seoul')
 
-    scheduled_time1 = datetime.now().astimezone(KST).replace(hour=8, minute=0, second=0)
-    #scheduled_time2 = datetime.now().astimezone(KST).replace(hour=23, minute=59, second=0)
-    
-    
-    bot_url = ""
-
-    schedule.every(10).minutes.do(send_slack_message, bot_url, "now").tag("now_send")
-    schedule.every().day.at(scheduled_time1.strftime('%H:%M')).do(reset_trand).tag("reset")
+    schedule.every(10).minutes.do(job)
+    schedule.every().day.at("00:00").do(reset_job)
 
     while True:
         server_now = datetime.now()
         now = datetime.now(KST)
 
-        if now.hour >= 8:
-            schedule.run_pending()
+        schedule.run_pending()
         time.sleep(10)
 
 
