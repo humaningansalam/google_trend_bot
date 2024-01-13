@@ -1,157 +1,113 @@
-# %%
-import requests #url로 요청을 보내는 모듈(슬렉)
-import json #클라이언트-서버가 통신하는 규율, 규격
+import requests
+import json
 import time
 import schedule
 import os
+import logging
 from datetime import datetime, timedelta
 from pytz import timezone
-
 from selenium import webdriver
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
 
-chrome_options = webdriver.ChromeOptions()
-chrome_options.add_argument('--headless')
-chrome_options.add_argument('--no-sandbox')
-chrome_options.add_argument('--disable-dev-shm-usage')
+class GoogleTrendsBot:
+    def __init__(self, bot_url, interval="10"):
+        self.bot_url = bot_url
+        self.interval = interval
+        self.chrome_options = webdriver.ChromeOptions()
+        self.chrome_options.add_argument('--headless')
+        self.chrome_options.add_argument('--no-sandbox')
+        self.chrome_options.add_argument('--disable-dev-shm-usage')
+        self.trand_list = []
+        self.reset_done = False
 
-bot_url = os.getenv('SLACK_WEBHOOK', 'default_url')
-# %%
-def get_now_google_trand():
-    
-    global trand_list
-    global server_now
-    feed_list = []
-    feed_find = []
-    
-    
-    day = str(server_now.day)+"일"
+        # 로거 설정
+        logging.basicConfig(filename='GoogleTrendsBot.log', level=logging.INFO)
 
-    #with webdriver.Chrome() as browser:
-    try:
-        with webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options) as browser:
+    def get_now_google_trand(self):
+        feed_list = []
+        feed_find = []
+        day = str(self.server_now.day)+"일"
 
-            url = "https://trends.google.co.kr/trends/trendingsearches/daily?geo=KR&hl=ko"
-            browser.get(url)
+        try:
+            with webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.chrome_options) as browser:
+                url = "https://trends.google.co.kr/trends/trendingsearches/daily?geo=KR&hl=ko"
+                browser.get(url)
+                browser.implicitly_wait(60)
+                browser = browser.find_elements(By.CLASS_NAME, "feed-list-wrapper")
 
-            browser.implicitly_wait(60)
+                for feed in browser: 
+                    feed_time = (feed.find_element(By.CLASS_NAME, "content-header-title").text).split(" ")[2]
+                    if feed_time == day:
+                        feed_find = feed.find_elements(By.CLASS_NAME, "md-list-block")
+                        break;
 
-            browser = browser.find_elements(By.CLASS_NAME, "feed-list-wrapper")
+                if len(feed_find) == 0:
+                    pass
+                else:
+                    for feed in feed_find:
+                        title = feed.find_element(By.CLASS_NAME, "title").text
+                        if title in self.trand_list:
+                            pass
+                        else:
+                            content = feed.find_element(By.CLASS_NAME, "summary-text").text
+                            url = feed.find_element(By.TAG_NAME, "feed-item").get_attribute("share-url")
+                            info = feed.find_element(By.CLASS_NAME, "source-and-time").get_attribute("title")
+                            feed_list.append('{} \n{} \n{} \n{}'.format(title, content, url, info))
+                            self.trand_list.append(title)
 
-            for feed in browser: 
-                feed_time = (feed.find_element(By.CLASS_NAME, "content-header-title").text).split(" ")[2]
-                if feed_time == day:
-                    feed_find = feed.find_elements(By.CLASS_NAME, "md-list-block")
-                    break;
+        except Exception as e:   
+            logging.error('예외 발생', exc_info=True)
 
-            print(feed_find)
-            if len(feed_find) == 0:
-                pass
-            
-            else:
-                for feed in feed_find: 
-                    title = feed.find_element(By.CLASS_NAME, "title").text
-                    
-                    if title in trand_list:
-                        pass
-                    else:
-                        content = feed.find_element(By.CLASS_NAME, "summary-text").text
-                        url = feed.find_element(By.TAG_NAME, "feed-item").get_attribute("share-url")
-                        info = feed.find_element(By.CLASS_NAME, "source-and-time").get_attribute("title")
-                        feed_list.append('{} \n{} \n{} \n{}'.format(title, content, url, info))
-                        trand_list.append(title)
+        return feed_list
 
-    except Exception as e:   
-        print('예외', e)
+    def send_slack_message(self):
+        feed_list = self.get_now_google_trand()
 
+        if len(feed_list) == 0:
+            pass
+        else:
+            for feed in feed_list:
+                payload = {
+                    "text": feed
+                }
 
-    return feed_list
+                response = requests.post(
+                    self.bot_url,
+                    data=json.dumps(payload),
+                    headers={"Content-Type":"application/json"}
+                )
 
-# %%
-def send_slack_message(bot_url, day):
+    def reset_trand(self):
+        self.trand_list = []
 
-    global server_now
+    def job(self):
+        if self.now.hour >= 8 and self.now.hour < 24:
+            self.send_slack_message()
+            self.reset_done = False
 
-    feed_list = get_now_google_trand()
+    def reset_job(self):
+        if self.now.hour == 0:
+            if not self.reset_done:
+                self.reset_trand()
+                self.reset_done = True
 
-    if len(feed_list) == 0:
-        pass
-    else:
-        for feed in feed_list:
-            payload = {
-                "text": feed
-            }
-            # payload =  { "name" : "Lee Morgan",
-            #   "interviewer":"interviewed by: <a href='http://onehungrymind.com/angularjs-dynamic-templates/'>Sonny Stitt</a>",
-            #   "day" : "Saturday",
-            #   "date": "April 18th", 
-            # }
-            #get, post => CRUD
-            response = requests.post(
-                bot_url,
-                data=json.dumps(payload),
-                headers={"Content-Type":"application/json"}
-            )
-            print("server_time:{} \t resopone:{}".format(server_now,response))
-            
-    #print(trand_list)
-    #print(feed_list)
-    #https://api.slack.com/messaging/composing
+    def run(self):
+        KST = timezone('Asia/Seoul')
 
-# %%
-def reset_trand():
-    global trand_list
-    trand_list = []
+        schedule.every(int(self.interval)).minutes.do(self.job)
+        schedule.every().day.at("00:00").do(self.reset_job)
 
+        while True:
+            self.server_now = datetime.now()
+            self.now = datetime.now(KST)
+            schedule.run_pending()
+            time.sleep(10)
 
-def job():
-    global now
-    global reset_done
-    global bot_url
-
-    if now.hour >= 8 and now.hour < 24:
-        send_slack_message(bot_url, "now")
-        reset_done = False
-
-def reset_job():
-    global now
-    global reset_done
-
-    if now.hour == 0:
-        if not reset_done:
-            reset_trand()
-            reset_done = True
-
-
-
-# %%
 if __name__ == "__main__":
-
-    global trand_list
-    global server_now
-    global now
-    global reset_done
-
-    trand_list = []
-    reset_done = False
-
-    KST = timezone('Asia/Seoul')
-
-    schedule.every(10).minutes.do(job)
-    schedule.every().day.at("00:00").do(reset_job)
-
-    while True:
-        server_now = datetime.now()
-        now = datetime.now(KST)
-
-        schedule.run_pending()
-        time.sleep(10)
-
-
-
-# %%
-
-
-
+    # 슬랙 웹훅 URL과 스케줄링 간격을 환경 변수에서 가져오도록 변경
+    bot_url = os.getenv('SLACK_WEBHOOK', 'default_url')
+    interval = os.getenv('SCHEDULE_INTERVAL', "10")
+    bot = GoogleTrendsBot(bot_url, interval)
+    bot.run()
