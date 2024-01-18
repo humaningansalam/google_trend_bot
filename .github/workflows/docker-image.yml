@@ -60,7 +60,7 @@ jobs:
         script: |
           cd ~/docker/google_trand_slack_bot
           echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" > .env
-          echo "FLUENTD_URL=${{ secrets.FLUENTED_URL }}" >> .env
+          echo "FLUENTD_URL=${{ secrets.FLUENTD_URL }}" >> .env
           docker compose down
           docker compose build
           docker compose up -d
