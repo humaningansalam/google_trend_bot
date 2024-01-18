@@ -50,6 +50,11 @@ class GoogleTrendsBot:
         feed_find = []
         day = str(self.server_now.day)+"일"
 
+        # WebDriver 세션이 유효한지 확인
+        if self.browser.service.process is None or not self.browser.service.process.is_alive():
+            # WebDriver 세션이 유효하지 않으면 새로 생성
+            self.browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.chrome_options)
+
         try:
             url = "https://trends.google.co.kr/trends/trendingsearches/daily?geo=KR&hl=ko"
             self.browser.get(url)
@@ -78,9 +83,8 @@ class GoogleTrendsBot:
 
         except Exception as e:   
             logging.error('예외 발생', exc_info=True)
-        finally:
-            # 현재 창 닫기
-            self.browser.close()
+            self.browser.quit()
+
 
         return feed_list
 
