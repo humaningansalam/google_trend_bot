@@ -23,6 +23,18 @@ jobs:
     - name: Run Docker container
       run: docker run -d  myapp
 
+    - name: action-slack
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        author_name: Gibhub Actions - build
+        fields: repo,commit,message,author # action,eventName,ref,workflow,job,took 추가할 수 있음
+        mention: here
+        if_mention: failure,cancelled
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_ALARM }} # required
+      if: always() # Pick up events even if the job fails or is canceled.
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -48,7 +60,20 @@ jobs:
         script: |
           cd ~/docker/google_trand_slack_bot
           echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" > .env
+          echo "FLUENTD_URL=${{ secrets.FLUENTED_URL }}" >> .env
           docker compose down
           docker compose build
           docker compose up -d
+
+    - name: action-slack
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        author_name: Gibhub Actions - deploy
+        fields: repo,commit,message,author # action,eventName,ref,workflow,job,took 추가할 수 있음
+        mention: here
+        if_mention: failure,cancelled
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_ARALM }} # required
+      if: always() # Pick up events even if the job fails or is canceled.
 
