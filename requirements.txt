@@ -3,3 +3,4 @@ requests==2.31.0
 schedule==1.2.1       
 selenium==4.16.0 
 webdriver-manager==4.0.1
+fluent-logger==0.10.0

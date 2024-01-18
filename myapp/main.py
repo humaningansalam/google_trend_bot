@@ -6,13 +6,17 @@ import os
 import logging
 from datetime import datetime, timedelta
 from pytz import timezone
+
+from fluent import sender
+from fluent import event
+
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
 class GoogleTrendsBot:
-    def __init__(self, bot_url, interval="10"):
+    def __init__(self, bot_url, fluentd_url, interval="10"):
         self.bot_url = bot_url
         self.interval = interval
         self.chrome_options = webdriver.ChromeOptions()
@@ -24,22 +28,21 @@ class GoogleTrendsBot:
 
         # 로그 생성
         logger = logging.getLogger()
-
         # 로그의 출력 기준 설정
         logger.setLevel(logging.INFO)
-
         # log 출력 형식
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
         # log를 console에 출력
         stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(formatter)
         logger.addHandler(stream_handler)
-
         # log를 파일에 출력
-        file_handler = logging.FileHandler('GoogleTrendsBot.log')
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        #file_handler = logging.FileHandler('GoogleTrendsBot.log')
+        #file_handler.setFormatter(formatter)
+        #logger.addHandler(file_handler)
+
+        # Fluentd 로거 생성
+        fluent = sender.FluentSender('crawling', host=fluentd_url, port=24224)
 
         # 크롬 인스턴스 생성
         self.browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.chrome_options)
@@ -99,6 +102,10 @@ class GoogleTrendsBot:
                     "text": feed
                 }
 
+                # Fluentd로 전송
+                event.Event('follow', payload)
+
+                # Slack로 전송
                 response = requests.post(
                     self.bot_url,
                     data=json.dumps(payload),
@@ -140,6 +147,7 @@ class GoogleTrendsBot:
 if __name__ == "__main__":
     # 슬랙 웹훅 URL과 스케줄링 간격을 환경 변수에서 가져오도록 변경
     bot_url = os.getenv('SLACK_WEBHOOK', 'default_url')
+    fluentd_url = os.getenv('FLUENTD_URL', 'default_url')
     interval = os.getenv('SCHEDULE_INTERVAL', "10")
-    bot = GoogleTrendsBot(bot_url, interval)
+    bot = GoogleTrendsBot(bot_url, fluentd_url, interval)
     bot.run()
