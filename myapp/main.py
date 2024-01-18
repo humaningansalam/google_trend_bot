@@ -9,6 +9,7 @@ from pytz import timezone
 
 from fluent import sender
 from fluent import event
+from prometheus_client import start_http_server, Summary, Counter
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -43,6 +44,11 @@ class GoogleTrendsBot:
 
         # Fluentd 로거 생성
         fluent = sender.FluentSender('crawling', host=fluentd_url, port=24224)
+
+        # Prometheus 메트릭 정의
+        self.REQUEST_TIME = Summary('request_processing_seconds', 'Time spent processing request')
+        self.COMPLETED_JOBS = Counter('completed_jobs', 'Number of completed jobs')
+        self.ERRORS = Counter('errors', 'Number of errors')
 
         # 크롬 인스턴스 생성
         self.browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.chrome_options)
@@ -84,7 +90,8 @@ class GoogleTrendsBot:
                         feed_list.append('{} \n{} \n{} \n{}'.format(title, content, url, info))
                         self.trand_list.append(title)
 
-        except Exception as e:   
+        except Exception as e:
+            self.ERRORS.inc()   
             logging.error('예외 발생', exc_info=True)
             self.browser.quit()
 
@@ -92,25 +99,31 @@ class GoogleTrendsBot:
         return feed_list
 
     def send_slack_message(self):
-        feed_list = self.get_now_google_trand()
 
-        if len(feed_list) == 0:
-            pass
-        else:
-            for feed in feed_list:
-                payload = {
-                    "text": feed
-                }
+        # 작업 수행 시간 측정 시작
+        with self.REQUEST_TIME.time():
+            feed_list = self.get_now_google_trand()
 
-                # Fluentd로 전송
-                event.Event('follow', payload)
+            if len(feed_list) == 0:
+                pass
+            else:
+                for feed in feed_list:
+                    payload = {
+                        "text": feed
+                    }
 
-                # Slack로 전송
-                response = requests.post(
-                    self.bot_url,
-                    data=json.dumps(payload),
-                    headers={"Content-Type":"application/json"}
-                )
+                    # Fluentd로 전송
+                    event.Event('follow', payload)
+
+                    # Slack로 전송
+                    response = requests.post(
+                        self.bot_url,
+                        data=json.dumps(payload),
+                        headers={"Content-Type":"application/json"}
+                    )
+
+            # 완료된 작업 수 증가
+            self.COMPLETED_JOBS.inc()
 
     def reset_trand(self):
         self.trand_list = []
@@ -139,6 +152,7 @@ class GoogleTrendsBot:
                 schedule.run_pending()
                 time.sleep(10)
         except Exception as e:
+            self.ERRORS.inc()
             logging.error('예외 발생', exc_info=True)
         finally:
             # WebDriver 세션 종료
@@ -149,5 +163,8 @@ if __name__ == "__main__":
     bot_url = os.getenv('SLACK_WEBHOOK', 'default_url')
     fluentd_url = os.getenv('FLUENTD_URL', 'default_url')
     interval = os.getenv('SCHEDULE_INTERVAL', "10")
+
+    start_http_server(8000)
+
     bot = GoogleTrendsBot(bot_url, fluentd_url, interval)
     bot.run()
