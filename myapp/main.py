@@ -51,7 +51,7 @@ class GoogleTrendsBot:
         day = str(self.server_now.day)+"일"
 
         # WebDriver 세션이 유효한지 확인
-        if self.browser.service.process is None or not self.browser.service.process.is_alive():
+        if self.browser.service.is_connectable() is False:
             # WebDriver 세션이 유효하지 않으면 새로 생성
             self.browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.chrome_options)
 
