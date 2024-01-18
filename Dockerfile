@@ -16,5 +16,6 @@ RUN apt-get update \
 WORKDIR ./myapp
 
 ENV SLACK_WEBHOOK=api_key
+ENV FLUENTD_URL=fluentd_url
 
 CMD ["python", "main.py"]
