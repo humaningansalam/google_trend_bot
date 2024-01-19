@@ -17,5 +17,6 @@ WORKDIR ./myapp
 
 ENV SLACK_WEBHOOK=api_key
 ENV FLUENTD_URL=fluentd_url
+ENV LOG_LEVEL = INFO
 
 CMD ["python", "main.py"]

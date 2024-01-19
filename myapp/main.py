@@ -17,20 +17,22 @@ from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
 class GoogleTrendsBot:
-    def __init__(self, bot_url, fluentd_url, interval="10"):
+    def __init__(self, bot_url, fluentd_url, log_level, interval="10"):
         self.bot_url = bot_url
         self.interval = interval
         self.chrome_options = webdriver.ChromeOptions()
         self.chrome_options.add_argument('--headless')
         self.chrome_options.add_argument('--no-sandbox')
         self.chrome_options.add_argument('--disable-dev-shm-usage')
-        self.trand_list = []
+        self.trend_list = []
         self.reset_done = False
 
         # 로그 생성
         logger = logging.getLogger()
+        # 로그 레벨 문자열을 적절한 로깅 상수로 변환
+        log_level_constant = getattr(logging, log_level, logging.INFO)
         # 로그의 출력 기준 설정
-        logger.setLevel(logging.INFO)
+        logger.setLevel(log_level_constant)
         # log 출력 형식
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         # log를 console에 출력
@@ -48,13 +50,15 @@ class GoogleTrendsBot:
         # Prometheus 메트릭 정의
         self.REQUEST_TIME = Summary('request_processing_seconds', 'Time spent processing request')
         self.COMPLETED_JOBS = Counter('completed_jobs', 'Number of completed jobs')
+        self.GET_TREND_DATA = Counter('get_trend_data', 'Number of get trend data')
+        self.CRAWLING_TREND_DATA = Counter('crawling_trend_data', 'Number of crawling trend data')
         self.ERRORS = Counter('errors', 'Number of errors')
 
         # 크롬 인스턴스 생성
         self.browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.chrome_options)
 
 
-    def get_now_google_trand(self):
+    def get_now_google_trend(self):
         feed_list = []
         feed_find = []
         day = str(self.server_now.day)+"일"
@@ -81,14 +85,18 @@ class GoogleTrendsBot:
             else:
                 for feed in feed_find:
                     title = feed.find_element(By.CLASS_NAME, "title").text
-                    if title in self.trand_list:
+                    if title in self.trend_list:
                         pass
                     else:
                         content = feed.find_element(By.CLASS_NAME, "summary-text").text
                         url = feed.find_element(By.TAG_NAME, "feed-item").get_attribute("share-url")
                         info = feed.find_element(By.CLASS_NAME, "source-and-time").get_attribute("title")
                         feed_list.append('{} \n{} \n{} \n{}'.format(title, content, url, info))
-                        self.trand_list.append(title)
+
+                        logging.info(title)
+
+                        self.trend_list.append(title)
+                        self.CRAWLING_TREND_DATA.inc()
 
         except Exception as e:
             self.ERRORS.inc()   
@@ -102,7 +110,7 @@ class GoogleTrendsBot:
 
         # 작업 수행 시간 측정 시작
         with self.REQUEST_TIME.time():
-            feed_list = self.get_now_google_trand()
+            feed_list = self.get_now_google_trend()
 
             if len(feed_list) == 0:
                 pass
@@ -121,12 +129,13 @@ class GoogleTrendsBot:
                         data=json.dumps(payload),
                         headers={"Content-Type":"application/json"}
                     )
+                    self.GET_TREND_DATA.inc()
 
             # 완료된 작업 수 증가
             self.COMPLETED_JOBS.inc()
 
-    def reset_trand(self):
-        self.trand_list = []
+    def reset_trend(self):
+        self.trend_list = []
 
     def job(self):
         if self.now.hour >= 8 and self.now.hour < 24:
@@ -134,16 +143,16 @@ class GoogleTrendsBot:
             self.reset_done = False
 
     def reset_job(self):
-        if self.now.hour == 0:
+        if self.now.hour == 1:
             if not self.reset_done:
-                self.reset_trand()
+                self.reset_trend()
                 self.reset_done = True
 
     def run(self):
         KST = timezone('Asia/Seoul')
 
         schedule.every(int(self.interval)).minutes.do(self.job)
-        schedule.every().day.at("00:00").do(self.reset_job)
+        schedule.every().day.at("01:00").do(self.reset_job)
 
         try:
             while True:
@@ -163,8 +172,8 @@ if __name__ == "__main__":
     bot_url = os.getenv('SLACK_WEBHOOK', 'default_url')
     fluentd_url = os.getenv('FLUENTD_URL', 'default_url')
     interval = os.getenv('SCHEDULE_INTERVAL', "10")
-
+    log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
     start_http_server(8000)
 
-    bot = GoogleTrendsBot(bot_url, fluentd_url, interval)
+    bot = GoogleTrendsBot(bot_url, fluentd_url, log_level, interval)
     bot.run()
