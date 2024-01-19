@@ -43,7 +43,7 @@ class GoogleTrendsBot:
         #logger.addHandler(file_handler)
 
         # Fluentd 로거 생성
-        fluent = sender.FluentSender('crawling', host=fluentd_url, port=24224)
+        self.fluent = sender.FluentSender('crawling', host=fluentd_url, port=24224)
 
         # Prometheus 메트릭 정의
         self.REQUEST_TIME = Summary('request_processing_seconds', 'Time spent processing request')
@@ -113,7 +113,7 @@ class GoogleTrendsBot:
                     }
 
                     # Fluentd로 전송
-                    event.Event('follow', payload)
+                    self.fluent.emit_with_time('follow', int(time.time()), payload)
 
                     # Slack로 전송
                     response = requests.post(
