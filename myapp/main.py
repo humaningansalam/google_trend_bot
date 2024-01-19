@@ -67,6 +67,7 @@ class GoogleTrendsBot:
         if self.browser.service.is_connectable() is False:
             # WebDriver 세션이 유효하지 않으면 새로 생성
             self.browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.chrome_options)
+            logging.debug('reopen webdriver session')
 
         try:
             url = "https://trends.google.co.kr/trends/trendingsearches/daily?geo=KR&hl=ko"
@@ -80,6 +81,7 @@ class GoogleTrendsBot:
                     feed_find = feed.find_elements(By.CLASS_NAME, "md-list-block")
                     break;
 
+            logging.debug(len(feed_find))
             if len(feed_find) == 0:
                 pass
             else:
