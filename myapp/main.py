@@ -93,7 +93,7 @@ class GoogleTrendsBot:
                         info = feed.find_element(By.CLASS_NAME, "source-and-time").get_attribute("title")
                         feed_list.append('{} \n{} \n{} \n{}'.format(title, content, url, info))
 
-                        logging.info(title)
+                        logging.debug(title)
 
                         self.trend_list.append(title)
                         self.CRAWLING_TREND_DATA.inc()
@@ -136,6 +136,7 @@ class GoogleTrendsBot:
 
     def reset_trend(self):
         self.trend_list = []
+        logging.info('reset done')
 
     def job(self):
         if self.now.hour >= 8 and self.now.hour < 24:
