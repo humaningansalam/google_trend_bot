@@ -61,7 +61,7 @@ class GoogleTrendsBot:
     def get_now_google_trend(self):
         feed_list = []
         feed_find = []
-        day = str(self.server_now.day)+"일"
+        day = str(self.now.day)+"일"
 
         # WebDriver 세션이 유효한지 확인
         if self.browser.service.is_connectable() is False:
@@ -143,13 +143,13 @@ class GoogleTrendsBot:
     def job(self):
         if self.now.hour >= 8 and self.now.hour < 24:
             self.send_slack_message()
-            self.reset_done = False
+            if self.reset_done:
+                self.reset_done = False
 
     def reset_job(self):
-        if self.now.hour == 1:
-            if not self.reset_done:
-                self.reset_trend()
-                self.reset_done = True
+        if not self.reset_done:
+            self.reset_trend()
+            self.reset_done = True
 
     def run(self):
         KST = timezone('Asia/Seoul')
@@ -159,7 +159,6 @@ class GoogleTrendsBot:
 
         try:
             while True:
-                self.server_now = datetime.now()
                 self.now = datetime.now(KST)
                 schedule.run_pending()
                 time.sleep(10)
