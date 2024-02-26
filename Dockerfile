@@ -14,7 +14,7 @@ RUN apk add --no-cache python3 py3-pip chromium udev ttf-freefont \
     && chmod +x /usr/bin/chromedriver \
     && rm LATEST_RELEASE chromedriver_linux64.zip \
     && python3 -m pip install --upgrade pip \
-    && python3 pip install --no-cache-dir -r requirements.txt
+    && python3 -m pip install --no-cache-dir -r requirements.txt
 
 WORKDIR ./myapp
 
