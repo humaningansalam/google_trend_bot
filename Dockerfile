@@ -5,10 +5,11 @@ WORKDIR /usr/src/app
 COPY . .
 
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip wget unzip curl \
-    && wget -q https://raw.githubusercontent.com/scheib/chromium-latest-linux/master/update.sh \
-    && chmod +x update.sh \
-    && ./update.sh \
-    && mv chrome-latest-linux /usr/bin/chromium \
+    && wget -q https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2FLAST_CHANGE?alt=media -O LAST_CHANGE \
+    && LATEST=$(cat LAST_CHANGE) \
+    && wget https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2F${LATEST}%2Fchrome-linux.zip?alt=media -O chrome-linux.zip \
+    && unzip chrome-linux.zip \
+    && mv chrome-linux /usr/bin/chromium \
     && chmod +x /usr/bin/chromium \
     && CHROMIUM_VERSION=$(chromium --version | grep -oP 'Chromium \K[0-9]+') \
     && wget -q "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROMIUM_VERSION" -O LATEST_RELEASE \
@@ -17,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
     && unzip chromedriver_linux64.zip \
     && mv chromedriver /usr/bin/chromedriver \
     && chmod +x /usr/bin/chromedriver \
-    && rm update.sh LATEST_RELEASE chromedriver_linux64.zip \
+    && rm LAST_CHANGE chrome-linux.zip LATEST_RELEASE chromedriver_linux64.zip \
     && pip3 install --upgrade pip \
     && pip3 install --no-cache-dir -r requirements.txt \
     && apt-get clean \
