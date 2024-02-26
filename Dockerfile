@@ -9,7 +9,7 @@ RUN apt-get install -y --no-install-recommends python3 python3-pip wget unzip cu
 RUN wget -q https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2FLAST_CHANGE?alt=media -O LAST_CHANGE && \
     echo $(cat LAST_CHANGE) > latest && \
     export LATEST=$(cat latest) && \
-    wget https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2F${LATEST}%2Fchrome
+    wget https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2F${LATEST}%2Fchrome-linux.zip?alt=media -O chrome-linux.zip
 RUN unzip chrome-linux.zip
 RUN mv chrome-linux /usr/bin/chromium
 RUN chmod -R +x /usr/bin/chromium
