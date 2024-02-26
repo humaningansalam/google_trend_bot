@@ -4,7 +4,7 @@ WORKDIR /usr/src/app
 
 COPY . .
 
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip wget unzip \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip wget unzip curl \
     && wget -q https://raw.githubusercontent.com/scheib/chromium-latest-linux/master/update.sh \
     && chmod +x update.sh \
     && ./update.sh \
