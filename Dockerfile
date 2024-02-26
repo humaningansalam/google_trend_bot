@@ -13,7 +13,7 @@ RUN wget -q https://www.googleapis.com/download/storage/v1/b/chromium-browser-sn
 RUN unzip chrome-linux.zip
 RUN mv chrome-linux /usr/bin/chromium
 RUN chmod -R +x /usr/bin/chromium
-RUN CHROMI_VERSION=$(/usr/bin/chromium/chrome --version | grep -oP 'ChromiumK[0-9]+')
+RUN CHROMI_VERSION=$(/usr/bin/chromium/chrome --version | grep -oP '[0-9.]+')
 RUN wget -q "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROMIUM_VERSION" -O LATEST_RELEASE
 RUN CHROMEDRIVER_VERSION=$(cat LATEST_RELEASE)
 RUN wget -q "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip"
