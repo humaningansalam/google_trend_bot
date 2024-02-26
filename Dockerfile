@@ -1,11 +1,11 @@
-FROM python:3.10.13-slim
+FROM ubuntu:22.04
 
 WORKDIR /usr/src/app
 
 COPY . .
 
 RUN apt-get update \
-    && apt-get install -y wget gnupg chromium\
+    && apt-get install -y wget gnupg chromium python3.10 python3.10-pip\
     && CHROMIUM_VERSION=$(chromium --version | grep -oP 'Chromium \K[0-9]+') \
     && wget -q "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROMIUM_VERSION" -O LATEST_RELEASE \
     && CHROMEDRIVER_VERSION=$(cat LATEST_RELEASE) \
