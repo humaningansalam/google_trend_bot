@@ -1,11 +1,10 @@
-FROM ubuntu:22.04-slim
+FROM alpine:latest
 
 WORKDIR /usr/src/app
 
 COPY . .
 
-RUN apt-get update \
-    && apt-get install -y wget gnupg chromium-browser python3.10 python3.10-pip\
+RUN apk add --no-cache python3 py3-pip chromium udev ttf-freefont \
     && CHROMIUM_VERSION=$(chromium-browser --version | grep -oP 'Chromium \K[0-9]+') \
     && wget -q "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROMIUM_VERSION" -O LATEST_RELEASE \
     && CHROMEDRIVER_VERSION=$(cat LATEST_RELEASE) \
@@ -14,8 +13,8 @@ RUN apt-get update \
     && mv chromedriver /usr/bin/chromedriver \
     && chmod +x /usr/bin/chromedriver \
     && rm LATEST_RELEASE chromedriver_linux64.zip \
-    && python -m pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && python3 -m pip install --upgrade pip \
+    && python3 pip install --no-cache-dir -r requirements.txt
 
 WORKDIR ./myapp
 
@@ -23,4 +22,4 @@ ENV SLACK_WEBHOOK=api_key
 ENV FLUENTD_URL=fluentd_url
 ENV LOG_LEVEL = INFO
 
-CMD ["python", "main.py"]
+CMD ["python3", "main.py"]
