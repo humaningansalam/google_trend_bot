@@ -6,10 +6,10 @@ COPY . .
 
 RUN apt-get update
 RUN apt-get install -y --no-install-recommends python3 python3-pip wget unzip curl libglib2.0-0 libnss3 libfontconfig1 libxrender1 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libxkbcommon0 libpango1.0-0 libasound2
-RUN wget -q https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2FLAST_CHANGE?alt=media -O LAST_CHANGE
-RUN echo $(cat LAST_CHANGE) > latest
-ENV LATEST='cat latest'
-RUN wget https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2F${LATEST}%2Fchrome-linux.zip?alt=media -O chrome-linux.zip
+RUN wget -q https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2FLAST_CHANGE?alt=media -O LAST_CHANGE && \
+    echo $(cat LAST_CHANGE) > latest && \
+    export LATEST=$(cat latest) && \
+    wget https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2F${LATEST}%2Fchrome
 RUN unzip chrome-linux.zip
 RUN mv chrome-linux /usr/bin/chromium
 RUN chmod -R +x /usr/bin/chromium
