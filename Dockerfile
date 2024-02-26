@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
     && wget https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2F${LATEST}%2Fchrome-linux.zip?alt=media -O chrome-linux.zip \
     && unzip chrome-linux.zip \
     && mv chrome-linux /usr/bin/chromium \
-    && chmod +x /usr/bin/chromium \
-    && CHROMIUM_VERSION=$(chromium --version | grep -oP 'Chromium \K[0-9]+') \
+    && chmod -R +x /usr/bin/chromium \
+    && CHROMIUM_VERSION=$(chromium/chrome --version | grep -oP 'Chromium \K[0-9]+') \
     && wget -q "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROMIUM_VERSION" -O LATEST_RELEASE \
     && CHROMEDRIVER_VERSION=$(cat LATEST_RELEASE) \
     && wget -q "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip" \
