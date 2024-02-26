@@ -5,8 +5,8 @@ WORKDIR /usr/src/app
 COPY . .
 
 RUN apt-get update \
-    && apt-get install -y wget gnupg chromium-browser\
-    && CHROMIUM_VERSION=$(chromium-browser --version | grep -oP 'Chromium \K[0-9]+') \
+    && apt-get install -y wget gnupg chromium\
+    && CHROMIUM_VERSION=$(chromium --version | grep -oP 'Chromium \K[0-9]+') \
     && wget -q "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROMIUM_VERSION" -O LATEST_RELEASE \
     && CHROMEDRIVER_VERSION=$(cat LATEST_RELEASE) \
     && wget -q "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip" \
