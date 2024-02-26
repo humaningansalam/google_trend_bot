@@ -4,7 +4,7 @@ WORKDIR /usr/src/app
 
 COPY . .
 
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip wget unzip curl \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip wget unzip curl libglib2.0-0 libnss3 libfontconfig1 libxrender1 \
     && wget -q https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2FLAST_CHANGE?alt=media -O LAST_CHANGE \
     && LATEST=$(cat LAST_CHANGE) \
     && wget https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2F${LATEST}%2Fchrome-linux.zip?alt=media -O chrome-linux.zip \
