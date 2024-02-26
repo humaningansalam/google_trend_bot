@@ -3,10 +3,9 @@ services:
   app:
       build: .
       restart: unless-stopped
+      container_name: google_trend_bot
       env_file:
         - .env
-      ports:
-        - 8182:8000
       logging:
         driver: "json-file"
         options:
