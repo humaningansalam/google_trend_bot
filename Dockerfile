@@ -5,7 +5,7 @@ WORKDIR /usr/src/app
 COPY . .
 
 RUN apk add --no-cache python3 py3-pip chromium udev ttf-freefont \
-    && CHROMIUM_VERSION=$(chromium-browser --version | grep -oP 'Chromium \K[0-9]+') \
+    && CHROMIUM_VERSION=$(chromium --version | grep -oP 'Chromium \K[0-9]+') \
     && wget -q "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROMIUM_VERSION" -O LATEST_RELEASE \
     && CHROMEDRIVER_VERSION=$(cat LATEST_RELEASE) \
     && wget -q "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip" \
@@ -20,6 +20,6 @@ WORKDIR ./myapp
 
 ENV SLACK_WEBHOOK=api_key
 ENV FLUENTD_URL=fluentd_url
-ENV LOG_LEVEL = INFO
+ENV LOG_LEVEL=INFO
 
 CMD ["python3", "main.py"]
