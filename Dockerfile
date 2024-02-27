@@ -12,7 +12,6 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 RUN apt-get clean
 RUN rm -rf /var/lib/apt/lists/*
 
-
 WORKDIR ./myapp
 
 ENV SLACK_WEBHOOK=api_key
