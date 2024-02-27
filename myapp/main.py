@@ -12,7 +12,6 @@ from fluent import event
 from prometheus_client import start_http_server, Summary, Counter
 
 from selenium import webdriver
-#from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.service import Service as ChromiumService
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
@@ -57,7 +56,7 @@ class GoogleTrendsBot:
         self.ERRORS = Counter('errors', 'Number of errors')
 
         # 크롬 인스턴스 생성
-        self.browser = webdriver.Chrome(service=ChromiumService(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()), options=self.chrome_options)
+        self.browser = webdriver.Chrome(service=ChromiumService('/usr/bin/chromedriver'), options=self.chrome_options)
 
 
     def get_now_google_trend(self):
@@ -68,7 +67,7 @@ class GoogleTrendsBot:
         # WebDriver 세션이 유효한지 확인
         if self.browser.service.is_connectable() is False:
             # WebDriver 세션이 유효하지 않으면 새로 생성
-            self.browser = webdriver.Chrome(service=ChromiumService(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()), options=self.chrome_options)
+            self.browser = webdriver.Chrome(service=ChromiumService('/usr/bin/chromedriver'), options=self.chrome_options)
             logging.debug('reopen webdriver session')
 
         try:
