@@ -12,7 +12,6 @@ else
 fi
 
 wget -q "${CHROMIUM_URL}%2FLAST_CHANGE?alt=media" -O LAST_CHANGE
-echo $(cat LAST_CHANGE) > latest
 export LATEST=$(cat latest)
 wget "${CHROMIUM_URL}%2F${LATEST}%2Fchrome-linux.zip?alt=media" -O chrome-linux.zip
 unzip chrome-linux.zip

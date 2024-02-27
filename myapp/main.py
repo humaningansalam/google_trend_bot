@@ -55,7 +55,7 @@ class GoogleTrendsBot:
         self.ERRORS = Counter('errors', 'Number of errors')
 
         # 크롬 인스턴스 생성
-        self.browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.chrome_options)
+        self.browser = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=self.chrome_options)
 
 
     def get_now_google_trend(self):
@@ -66,7 +66,7 @@ class GoogleTrendsBot:
         # WebDriver 세션이 유효한지 확인
         if self.browser.service.is_connectable() is False:
             # WebDriver 세션이 유효하지 않으면 새로 생성
-            self.browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.chrome_options)
+            self.browser = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=self.chrome_options)
             logging.debug('reopen webdriver session')
 
         try:
