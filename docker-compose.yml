@@ -4,6 +4,8 @@ services:
       build: .
       restart: unless-stopped
       container_name: google_trend_bot
+      networks:
+        - bridge_server
       env_file:
         - .env
       logging:
@@ -11,3 +13,7 @@ services:
         options:
           max-size: "2m"
           max-file: "5"
+
+networks:
+  bridge_server:
+    external: true
