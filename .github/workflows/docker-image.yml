@@ -49,7 +49,7 @@ jobs:
         username: ${{ secrets.SERVER_USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         source: "."
-        target: "~/docker/google_trand_slack_bot/"
+        target: "~/docker/google_trend_slack_bot/"
 
     - name: Deploy to Ubuntu server
       uses: appleboy/ssh-action@master
@@ -58,7 +58,7 @@ jobs:
         username: ${{ secrets.SERVER_USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         script: |
-          cd ~/docker/google_trand_slack_bot
+          cd ~/docker/google_trend_slack_bot
           echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" > .env
           echo "FLUENTD_URL=${{ secrets.FLUENTD_URL }}" >> .env
           docker compose down
