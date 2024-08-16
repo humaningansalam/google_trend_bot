@@ -11,7 +11,7 @@ class Bot:
         self.slack_sender = slack_sender
         self.flogger = flogger
         self.pmetrics = pmetrics
-        self.interval = interval
+        self.interval = int(interval)
         self.is_running = False
         self.thread = None
         self.trend_dict = {}
