@@ -5,6 +5,8 @@ services:
       container_name: google_trend_bot
       networks:
         - bridge_server
+      ports:
+        - 12025:5000
       env_file:
         - .env
       logging:
