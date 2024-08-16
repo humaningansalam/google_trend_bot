@@ -22,6 +22,11 @@ jobs:
     - name: Run Docker container
       run: docker run -d  myapp
 
+    - name: Test
+      run: |
+        sleep 60
+        curl http://localhost:5000/health
+
     - name: action-slack
       uses: 8398a7/action-slack@v3
       with:
