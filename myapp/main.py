@@ -5,6 +5,7 @@ from comm_.fluented_logger import FLogger
 from comm_.prometheus_metric import PMetrics
 from comm_.rss_parser import RSSParser
 from comm_.slack_sender import SlackSender
+from monitor import ResourceMonitor
 
 import comm_.tool_util as tool_util
 
@@ -64,5 +65,7 @@ if __name__ == "__main__":
     pmetrics = PMetrics()
 
     bot = RSSBot(rss_parser, slack_sender, flogger, pmetrics, interval)
+    resource_monitor = ResourceMonitor(pmetrics)
+    resource_monitor.start_monitor()
 
     app.run(host='0.0.0.0', port=5000)#flask

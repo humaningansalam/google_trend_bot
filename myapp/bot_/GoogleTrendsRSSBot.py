@@ -48,7 +48,7 @@ class Bot:
     def start(self):
         if not self.is_running:
             self.is_running = True
-            self.thread = threading.Thread(target=self.run)
+            self.thread = Thread(target=self.run)
             self.thread.start()
             logging.info("Bot started")
         else:

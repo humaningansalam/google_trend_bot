@@ -1,13 +1,10 @@
 import os
 import logging
 import psutil
-from prometheus_client import Gauge
-import time
-
+import threading
 class ResourceMonitor:
-    def __init__(self, report_interval=5):
-        self.app_cpu_usage = Gauge('app_cpu_usage', 'Description of CPU usage')
-        self.app_ram_usage = Gauge('app_ram_usage', 'Description of RAM usage')
+    def __init__(self, pmetrics, report_interval=5):
+        self.pmetrics = pmetrics
         self.pid = os.getpid()
         self.process = psutil.Process(self.pid)
         self.report_interval = report_interval
@@ -24,8 +21,8 @@ class ResourceMonitor:
             cpu_usage = self.process.cpu_percent(interval=1)
             ram_usage = self.process.memory_info().rss / (1024 ** 2)  # Convert to MB
 
-            self.app_cpu_usage.set(cpu_usage)
-            self.app_ram_usage.set(ram_usage)
+            self.pmetrics.app_cpu_usage.set(cpu_usage)
+            self.pmetrics.app_ram_usage.set(ram_usage)
 
             logging.debug(f"CPU Usage: {cpu_usage}%, RAM Usage: {ram_usage} MB")
         except Exception as e:
