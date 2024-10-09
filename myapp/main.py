@@ -1,4 +1,5 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 from bot_.GoogleTrendsRSSBot import Bot as RSSBot 
 from comm_.fluented_logger import FLogger
@@ -66,6 +67,8 @@ if __name__ == "__main__":
 
     bot = RSSBot(rss_parser, slack_sender, flogger, pmetrics, interval)
     resource_monitor = ResourceMonitor(pmetrics)
-    resource_monitor.start_monitor()
+
+    executor = ThreadPoolExecutor(max_workers=2)
+    executor.submit(resource_monitor.start_monitor)
 
     app.run(host='0.0.0.0', port=5000)#flask
