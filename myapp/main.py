@@ -12,29 +12,32 @@ from flask import Flask, request, jsonify
 
 from prometheus_flask_exporter import PrometheusMetrics
 
-#flask
 app = Flask(__name__)
 metrics = PrometheusMetrics(app)
 
 bot = None
 
-@app.route('/start', methods=['GET'])
+@app.route('/start', methods=['POST'])
 def start_bot():
     global bot
-    if bot:
+    if bot and not bot.is_running:
         bot.start()
         return jsonify({"status": "Bot started"}), 200
+    elif bot and bot.is_running:
+        return jsonify({"status": "Bot is already running"}), 400
     return jsonify({"status": "Bot not initialized"}), 400
 
-@app.route('/stop', methods=['GET'])
+@app.route('/stop', methods=['POST'])
 def stop_bot():
     global bot
-    if bot:
+    if bot and bot.is_running:
         bot.stop()
         return jsonify({"status": "Bot stopped"}), 200
+    elif bot and not bot.is_running:
+        return jsonify({"status": "Bot is already stopped"}), 400
     return jsonify({"status": "Bot not initialized"}), 400
 
-@app.route('/reset', methods=['GET'])
+@app.route('/reset', methods=['POST'])
 def reset_trend():
     global bot
     if bot:
@@ -44,20 +47,17 @@ def reset_trend():
 
 @app.route('/health', methods=['GET'])
 def health():
-    """
-    flask health check 
-    """
     return "Healthy"
 
 if __name__ == "__main__":
-
     bot_url = os.getenv('SLACK_WEBHOOK', 'default_url')
     fluentd_url = os.getenv('FLUENTD_URL', 'default_url')
     interval = os.getenv('SCHEDULE_INTERVAL', "10")
     log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
 
-    tool_util.set_logging(log_level) 
+    tool_util.set_logging(log_level)
 
+    # Dependency injection for Bot class
     rss_parser = RSSParser()
     slack_sender = SlackSender(bot_url)
     flogger = FLogger(fluentd_url)
@@ -65,4 +65,4 @@ if __name__ == "__main__":
 
     bot = RSSBot(rss_parser, slack_sender, flogger, pmetrics, interval)
 
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000)#flask
