@@ -16,8 +16,6 @@ class Bot:
         self.thread = None
         self.trend_dict = {}
 
-        self.start()
-
     def job(self):
         with self.pmetrics.request_time.time():
             try:
@@ -50,7 +48,7 @@ class Bot:
     def start(self):
         if not self.is_running:
             self.is_running = True
-            self.thread = Thread(target=self.run)
+            self.thread = threading.Thread(target=self.run)
             self.thread.start()
             logging.info("Bot started")
         else:
