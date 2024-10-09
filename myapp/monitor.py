@@ -13,10 +13,16 @@ class ResourceMonitor:
         self.report_interval = report_interval
         self.monitoring = True
 
+    def _schedule_report(self):
+        if not self.monitoring:
+            return
+        self.sample_and_report()
+        threading.Timer(self.report_interval, self._schedule_report).start()
+
     def sample_and_report(self):
         try:
             cpu_usage = self.process.cpu_percent(interval=1)
-            ram_usage = self.process.memory_info().rss / (1024 ** 2)  # MB 단위로 변환
+            ram_usage = self.process.memory_info().rss / (1024 ** 2)  # Convert to MB
 
             self.app_cpu_usage.set(cpu_usage)
             self.app_ram_usage.set(ram_usage)
@@ -27,9 +33,8 @@ class ResourceMonitor:
 
     def start_monitor(self):
         logging.debug("Starting resource monitor")
-        while self.monitoring:
-            self.sample_and_report()
-            time.sleep(self.report_interval)
+        self.monitoring = True
+        self._schedule_report()
 
     def stop_monitor(self):
         self.monitoring = False
