@@ -23,10 +23,18 @@ jobs:
     - name: Run Docker container
       run: docker run -d -p 5000:5000 myapp
 
-    - name: Test
+    - name: Test Service
       run: |
-        sleep 60
-        curl http://localhost:5000/health
+          for i in {1..10}; do
+            if curl -s http://localhost:5000/health; then
+              echo "Service is up!"
+              exit 0
+            fi
+            echo "Waiting for the service to be up..."
+            sleep 6
+          done
+          echo "Service did not start in time"
+          exit 1
 
     - name: action-slack
       uses: 8398a7/action-slack@v3
