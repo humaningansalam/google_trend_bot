@@ -38,7 +38,7 @@ jobs:
     
     - name: Check Docker logs (if failed)
       if: failure()
-      run: docker logs myapp_container
+      run: docker logs myapp
 
     - name: action-slack
       uses: 8398a7/action-slack@v3
