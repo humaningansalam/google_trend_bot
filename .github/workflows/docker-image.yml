@@ -21,7 +21,7 @@ jobs:
       run: docker build -t myapp -f Dockerfile .
 
     - name: Run Docker container
-      run: docker run -d -p 5000:5000 myapp
+      run: docker run -d -p 5000:5000 --name myapp_container myapp
 
     - name: Test Service
       run: |
@@ -38,7 +38,7 @@ jobs:
     
     - name: Check Docker logs (if failed)
       if: failure()
-      run: docker logs myapp
+      run: docker logs myapp_container
 
     - name: action-slack
       uses: 8398a7/action-slack@v3
