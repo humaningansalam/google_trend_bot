@@ -35,6 +35,10 @@ jobs:
           done
           echo "Service did not start in time"
           exit 1
+    
+    - name: Check Docker logs (if failed)
+      if: failure()
+      run: docker logs myapp_container
 
     - name: action-slack
       uses: 8398a7/action-slack@v3
