@@ -1,21 +1,18 @@
 import os
 from concurrent.futures import ThreadPoolExecutor
 
-from bot_.GoogleTrendsRSSBot import Bot as RSSBot 
-from comm_.fluented_logger import FLogger
-from comm_.prometheus_metric import PMetrics
-from comm_.rss_parser import RSSParser
-from comm_.slack_sender import SlackSender
-from monitor import ResourceMonitor
+from myapp.src.bot.GoogleTrendsRSSBot import Bot as RSSBot 
+from myapp.comm.fluented_logger import FLogger
+from myapp.comm.prometheus_metric import PMetrics
+from myapp.comm.rss_parser import RSSParser
+from myapp.comm.slack_sender import SlackSender
+from myapp.src.monitor import ResourceMonitor
 
 import comm_.tool_util as tool_util
 
 from flask import Flask, request, jsonify
 
-from prometheus_flask_exporter import PrometheusMetrics
-
 app = Flask(__name__)
-metrics = PrometheusMetrics(app)
 
 bot = None
 
