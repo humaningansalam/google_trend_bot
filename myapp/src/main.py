@@ -7,8 +7,7 @@ from myapp.comm.prometheus_metric import PMetrics
 from myapp.comm.rss_parser import RSSParser
 from myapp.comm.slack_sender import SlackSender
 from myapp.src.monitor import ResourceMonitor
-
-import comm_.tool_util as tool_util
+import myapp.comm.tool_util as tool_util
 
 from flask import Flask, request, jsonify
 
