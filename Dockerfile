@@ -1,4 +1,8 @@
-FROM python:3.10-slim-bookworm
+FROM debian:bullseye-slim
+
+# 가상환경을 사용하도록 설정
+ENV POETRY_VIRTUALENVS_CREATE=true
+ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 
 WORKDIR /usr/src/app
 
