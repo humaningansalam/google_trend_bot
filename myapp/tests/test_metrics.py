@@ -1,5 +1,5 @@
-def test_metrics_endpoint(client):
-    response = client.get('/metrics')
+def test_metrics_endpoint(test_app):
+    response = test_app.get('/metrics')
     assert response.status_code == 200
     assert response.mimetype == 'text/plain'
     

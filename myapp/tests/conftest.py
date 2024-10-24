@@ -1,6 +1,8 @@
 from unittest.mock import Mock, MagicMock
 import pytest
+from datetime import datetime
 from prometheus_client import REGISTRY
+from selenium import webdriver
 
 from myapp.src.main import create_app
 from myapp.src.bot.GoogleTrendsRSSBot import Bot
@@ -15,7 +17,7 @@ def mock_rss_parser():
             'content': 'Test Content',
             'link': 'http://test.com',
             'published': '2024-01-01',
-            'parsed_time': '2024-01-01 00:00:00'
+            'parsed_time': datetime(2024, 1, 1, 0, 0, 0)
         }
     ]
     return parser

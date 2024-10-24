@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta
+
+
 def test_bot_job(test_bot, mock_rss_parser, mock_slack_sender, mock_flogger):
     test_bot.job()
     
@@ -6,9 +9,13 @@ def test_bot_job(test_bot, mock_rss_parser, mock_slack_sender, mock_flogger):
     mock_flogger.log.assert_called_once()
 
 def test_bot_reset_trend(test_bot):
+    current_time = datetime.now()
+    old_time = current_time - timedelta(days=5)  # 5일 전
+    new_time = current_time - timedelta(days=1)  # 1일 전
+
     test_bot.trend_dict = {
-        'Old Trend': '2020-01-01 00:00:00',
-        'New Trend': '2024-01-01 00:00:00'
+        'Old Trend': old_time,
+        'New Trend': new_time
     }
     test_bot.reset_trend()
     assert len(test_bot.trend_dict) == 1
