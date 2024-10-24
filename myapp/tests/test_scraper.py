@@ -5,15 +5,16 @@ def test_scraper_initialization(test_scraper):
     assert "--headless" in test_scraper.chrome_options.arguments
     assert "--disable-gpu" in test_scraper.chrome_options.arguments
 
-def test_scraper_setup_driver(test_scraper, mock_webdriver):
+def test_scraper_setup_driver(test_scraper):
     driver = test_scraper.setup_driver()
     assert driver is not None
 
-def test_scrape_trends(test_scraper, mock_webdriver):
+def test_scrape_trends(test_scraper):
     data = test_scraper.scrape_trends()
     assert isinstance(data, list)
+    assert data == [{'trend': 'Test Trend'}]
 
-def test_extract_trend_data(test_scraper, mock_webdriver):
+def test_extract_trend_data(test_scraper):
     mock_tr = Mock()
     mock_driver = Mock()
     

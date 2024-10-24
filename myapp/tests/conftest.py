@@ -61,7 +61,7 @@ def mock_webdriver():
 @pytest.fixture
 def test_scraper(monkeypatch):
     scraper = Scraper()
-    monkeypatch.setattr(webdriver, 'Chrome', lambda options: Mock())
+    scraper.scrape_trends = Mock(return_value=[{'trend': 'Test Trend'}])
     return scraper
 
 @pytest.fixture
@@ -69,6 +69,10 @@ def test_app(test_bot, test_scraper):
     app = create_app(bot=test_bot, scraper=test_scraper)
     app.config['TESTING'] = True
     return app
+
+@pytest.fixture
+def client(app):
+    return app.test_client()
 
 @pytest.fixture
 def get_counter_value():
