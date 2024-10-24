@@ -1,22 +1,72 @@
+from unittest.mock import Mock, MagicMock
 import pytest
 from prometheus_client import REGISTRY
 
-from myapp.src.main import app as flask_app
+from myapp.src.main import create_app
+from myapp.src.bot.GoogleTrendsRSSBot import Bot
+from myapp.src.bot.GoogleTrendsScraper import Scraper
 
 @pytest.fixture
-def app():
-    """테스트용 Flask 애플리케이션을 반환하는 fixture"""
-    return flask_app
+def mock_rss_parser():
+    parser = Mock()
+    parser.parse.return_value = [
+        {
+            'title': 'Test Trend',
+            'content': 'Test Content',
+            'link': 'http://test.com',
+            'published': '2024-01-01',
+            'parsed_time': '2024-01-01 00:00:00'
+        }
+    ]
+    return parser
 
 @pytest.fixture
-def client(app):
-    """Flask 테스트 클라이언트를 반환하는 fixture"""
-    return app.test_client()
+def mock_slack_sender():
+    sender = Mock()
+    sender.send_message.return_value = True
+    return sender
 
 @pytest.fixture
-def runner(app):
-    """Flask CLI runner를 반환하는 fixture"""
-    return app.test_cli_runner()
+def mock_flogger():
+    logger = Mock()
+    return logger
+
+@pytest.fixture
+def mock_pmetrics():
+    metrics = Mock()
+    metrics.request_time = MagicMock()
+    metrics.request_time.time.return_value.__enter__ = lambda x: None
+    metrics.request_time.time.return_value.__exit__ = lambda x, y, z, a: None
+    return metrics
+
+@pytest.fixture
+def test_bot(mock_rss_parser, mock_slack_sender, mock_flogger, mock_pmetrics):
+    return Bot(
+        mock_rss_parser,
+        mock_slack_sender,
+        mock_flogger,
+        mock_pmetrics,
+        interval=10
+    )
+
+@pytest.fixture
+def mock_webdriver():
+    driver = Mock()
+    driver.find_element.return_value = Mock()
+    driver.find_elements.return_value = []
+    return driver
+
+@pytest.fixture
+def test_scraper(monkeypatch):
+    scraper = Scraper()
+    monkeypatch.setattr(webdriver, 'Chrome', lambda options: Mock())
+    return scraper
+
+@pytest.fixture
+def test_app(test_bot, test_scraper):
+    app = create_app(bot=test_bot, scraper=test_scraper)
+    app.config['TESTING'] = True
+    return app
 
 @pytest.fixture
 def get_counter_value():
