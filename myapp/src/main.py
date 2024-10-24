@@ -2,6 +2,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 from myapp.src.bot.GoogleTrendsRSSBot import Bot as RSSBot 
+from myapp.src.bot.GoogleTrendsScraper import Scraper 
 from myapp.comm.fluented_logger import FLogger
 from myapp.comm.prometheus_metric import PMetrics
 from myapp.comm.rss_parser import RSSParser
@@ -14,6 +15,7 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 bot = None
+scraper = None
 
 @app.route('/start', methods=['POST'])
 def start_bot():
@@ -43,6 +45,21 @@ def reset_trend():
         return jsonify({"status": "Trend reset completed"}), 200
     return jsonify({"status": "Bot not initialized"}), 400
 
+@app.route('/trends', methods=['GET'])
+def get_trends():
+    try:
+        # 스크래퍼를 사용하여 현재 트렌드 데이터 수집
+        trends_data = scraper.scrape_trends()
+        return jsonify({
+            "status": "success",
+            "data": trends_data
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
 @app.route('/health', methods=['GET'])
 def health():
     return "Healthy"
@@ -62,6 +79,7 @@ if __name__ == "__main__":
     pmetrics = PMetrics()
 
     bot = RSSBot(rss_parser, slack_sender, flogger, pmetrics, interval)
+    scraper = Scraper()
     resource_monitor = ResourceMonitor(pmetrics)
 
     executor = ThreadPoolExecutor(max_workers=2)
