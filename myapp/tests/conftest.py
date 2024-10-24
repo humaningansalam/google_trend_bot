@@ -65,7 +65,7 @@ def test_scraper(monkeypatch):
     return scraper
 
 @pytest.fixture
-def test_app(test_bot, test_scraper):
+def app(test_bot, test_scraper):
     app = create_app(bot=test_bot, scraper=test_scraper)
     app.config['TESTING'] = True
     return app
