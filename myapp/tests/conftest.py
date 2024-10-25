@@ -86,7 +86,7 @@ def get_counter_value():
     return _get_counter_value
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="function", autouse=True)
 def cleanup_bot(test_bot):
     """테스트 종료 시 Bot 인스턴스를 안전하게 종료"""
     yield
