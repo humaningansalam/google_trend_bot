@@ -2,7 +2,7 @@ from unittest.mock import Mock, MagicMock
 import pytest
 from datetime import datetime
 from prometheus_client import REGISTRY
-from selenium import webdriver
+from playwright.sync_api import sync_playwright
 
 from myapp.src.main import create_app
 from myapp.src.bot.GoogleTrendsRSSBot import Bot
@@ -52,11 +52,13 @@ def test_bot(mock_rss_parser, mock_slack_sender, mock_flogger, mock_pmetrics):
     )
 
 @pytest.fixture
-def mock_webdriver():
-    driver = Mock()
-    driver.find_element.return_value = Mock()
-    driver.find_elements.return_value = []
-    return driver
+def mock_page():
+    page = Mock()
+    page.goto = Mock()
+    page.query_selector = Mock(return_value=Mock(inner_text=Mock(return_value="Test Trend")))
+    page.query_selector_all = Mock(return_value=[Mock()])
+    page.wait_for_selector = Mock()
+    return page
 
 @pytest.fixture
 def test_scraper(monkeypatch):
