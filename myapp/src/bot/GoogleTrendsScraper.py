@@ -1,68 +1,60 @@
 import time
 import pandas as pd
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.action_chains import ActionChains
-
+from playwright.sync_api import sync_playwright
 class Scraper:
     def __init__(self):
-        self.chrome_options = Options()
-        self.chrome_options.add_argument("--headless")
-        self.chrome_options.add_argument("--disable-gpu")
-        self.chrome_options.add_argument("--no-sandbox")
-        self.chrome_options.add_argument("--disable-dev-shm-usage")
+        pass
         
-    def setup_driver(self):
-        return webdriver.Chrome(options=self.chrome_options)
+    def setup_browser(self, playwright):
+        browser = playwright.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
+        return browser, context
         
     def scrape_trends(self):
-        driver = self.setup_driver()
-        try:
-            driver.get("https://trends.google.co.kr/trending?geo=KR&hl=ko&hours=24")
-            data = self._scrape_data(driver)
-            return data
-        finally:
-            driver.quit()
-            
-    def _scrape_data(self, driver):
+        with sync_playwright() as playwright:
+            browser, context = self.setup_browser(playwright)
+            try:
+                page = context.new_page()
+                page.goto("https://trends.google.co.kr/trending?geo=KR&hl=ko&hours=24")
+                # 페이지 로딩 대기
+                page.wait_for_selector("tbody[jsname='cC57zf']")
+                data = self._scrape_data(page)
+                return data
+            finally:
+                browser.close()
+                
+    def _scrape_data(self, page):
         data = []
-        tr_elements = WebDriverWait(driver, 10).until(
-            EC.presence_of_all_elements_located((By.XPATH, "//tbody[@jsname='cC57zf']/tr[@jsname='oKdM2c']"))
-        )
+        tr_elements = page.query_selector_all("tbody[jsname='cC57zf'] tr[jsname='oKdM2c']")
         
         for tr in tr_elements:
-            ActionChains(driver).move_to_element(tr).perform()
             tr.click()
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "EMz5P"))
-            )
-            time.sleep(0.5)
-
-            trend_data = self._extract_trend_data(tr, driver)
+            # 클릭 후 상세 정보가 로드될 때까지 대기
+            page.wait_for_selector(".EMz5P", timeout=10000)
+            time.sleep(0.5)  # 데이터 로드를 위한 짧은 대기
+            trend_data = self._extract_trend_data(tr, page)
             data.append(trend_data)
             
         return data
         
-    def _extract_trend_data(self, tr, driver):
-        trend_title = tr.find_element(By.CLASS_NAME, "mZ3RIc").text
-        search_volume = tr.find_element(By.CLASS_NAME, "lqv0Cb").text
+    def _extract_trend_data(self, tr, page):
+        trend_title = tr.query_selector(".mZ3RIc").inner_text()
+        search_volume = tr.query_selector(".lqv0Cb").inner_text()
         
         try:
-            status_text = tr.find_element(By.CLASS_NAME, "UQMqQd").text
-            active_status = status_text if "활성" not in status_text else "N/A"
+            status_element = tr.query_selector(".UQMqQd")
+            active_status = status_element.inner_text() if status_element else "N/A"
+            if "활성" in active_status:
+                active_status = "N/A"
         except:
             active_status = "N/A"
             
         try:
-            emz5p_element = driver.find_element(By.CLASS_NAME, "EMz5P")
-            analysis_spans = emz5p_element.find_elements(
-                By.XPATH, ".//div[@class='HLcRPe']//span[@jsname='V67aGc']"
-            )
-            trend_analysis = [span.text for span in analysis_spans if span.text.strip()]
+            emz5p_element = page.query_selector(".EMz5P")
+            analysis_elements = emz5p_element.query_selector_all("div.HLcRPe span[jsname='V67aGc']")
+            trend_analysis = [element.inner_text() for element in analysis_elements if element.inner_text().strip()]
         except:
             trend_analysis = []
             
@@ -81,14 +73,17 @@ class Scraper:
         
     def _extract_news_data(self, emz5p_element):
         news_data = []
-        news_elements = emz5p_element.find_elements(
-            By.XPATH, ".//div[@jsaction='click:vx9mmb;contextmenu:rbJKIe']"
+        news_elements = emz5p_element.query_selector_all(
+            "div[jsaction='click:vx9mmb;contextmenu:rbJKIe']"
         )
+        
         for news in news_elements:
             try:
-                news_title = news.find_element(By.CLASS_NAME, "QbLC8c").text
-                news_url = news.find_element(By.TAG_NAME, "a").get_attribute("href")
+                news_title = news.query_selector(".QbLC8c").inner_text()
+                news_url = news.query_selector("a").get_attribute("href")
                 news_data.append({"뉴스 제목": news_title, "URL": news_url})
             except:
                 continue
+                
         return news_data
+    
