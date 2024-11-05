@@ -6,7 +6,7 @@ class Scraper:
         pass
         
     def setup_browser(self, playwright):
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(headless=False)
         context = browser.new_context(
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         )
@@ -27,17 +27,36 @@ class Scraper:
                 
     def _scrape_data(self, page):
         data = []
-        tr_elements = page.query_selector_all("tbody[jsname='cC57zf'] tr[jsname='oKdM2c']")
-        
-        for tr in tr_elements:
-            tr.click()
-            # 클릭 후 상세 정보가 로드될 때까지 대기
-            page.wait_for_selector(".EMz5P", timeout=10000)
-            time.sleep(0.5)  # 데이터 로드를 위한 짧은 대기
-            trend_data = self._extract_trend_data(tr, page)
-            data.append(trend_data)
+        while True:
+            tr_count = 0
+            # 데이터 추출
+            tr_elements = page.query_selector_all("tbody[jsname='cC57zf'] tr[jsname='oKdM2c']")
             
+            for tr in tr_elements:
+                tr.click()
+                # 클릭 후 상세 정보가 로드될 때까지 대기
+                page.wait_for_selector(".EMz5P", timeout=10000)
+                time.sleep(0.5)  # 데이터 로드를 위한 짧은 대기
+                trend_data = self._extract_trend_data(tr, page)
+                data.append(trend_data)
+                tr_count += 1
+
+            # 데이터가 25개 미만이면 "다음" 버튼 클릭
+            if tr_count >= 25:
+                try:
+                    next_button = page.query_selector("button[jsname='ViaHrd']")
+                    if next_button:
+                        next_button.click()
+                        time.sleep(1)  # 버튼 클릭 후 로딩 대기
+                    else:
+                        break  # 버튼이 없으면 종료
+                except Exception:
+                    break  # 예외 발생 시 종료
+            else:
+                break  # 데이터가 25개 이상이면 종료
+
         return data
+
         
     def _extract_trend_data(self, tr, page):
         trend_title = tr.query_selector(".mZ3RIc").inner_text()
@@ -86,4 +105,9 @@ class Scraper:
                 continue
                 
         return news_data
-    
+
+if __name__ == "__main__":
+    app = Scraper()
+
+    trends_data = app.scrape_trends()
+    print(trends_data)
