@@ -1,8 +1,13 @@
 services:
-  app:
-      build: .
-      restart: unless-stopped
+  google_trend_bot:
+      build: 
+        context: .
+        args:
+          VERSION: ${VERSION}
+        tags:
+          - "google_trend_bot:${VERSION}"
       container_name: google_trend_bot
+      restart: unless-stopped
       networks:
         - bridge_server
       ports:

@@ -1,5 +1,8 @@
 FROM python:3.10-slim-bookworm
 
+ARG VERSION
+ENV VERSION=$VERSION
+
 WORKDIR /usr/src/app
 
 COPY . .

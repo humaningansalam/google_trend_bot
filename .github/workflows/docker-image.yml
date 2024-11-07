@@ -11,17 +11,24 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+
     steps:
     - uses: actions/checkout@v3
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    - name: Extract version from pyproject.toml
+      id: get_version
+      run: echo "VERSION=$(grep '^version =' pyproject.toml | sed -E 's/version = \"(.*)\"/\1/')" >> $GITHUB_OUTPUT
+
     - name: Build Docker image
-      run: docker build -t myapp -f Dockerfile .
+      run: docker build -t myapp:${{ steps.get_version.outputs.VERSION }} -f Dockerfile .
 
     - name: Run Docker container
-      run: docker run -d -p 5000:5000 --name myapp_container myapp
+      run: docker run -d -p 5000:5000 --name myapp_container myapp:${{ steps.get_version.outputs.VERSION }}
 
     - name: Test Service
       run: |
@@ -78,6 +85,7 @@ jobs:
           cd ~/docker/google_trend_slack_bot
           echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" > .env
           echo "FLUENTD_URL=${{ secrets.FLUENTD_URL }}" >> .env
+          echo "VERSION=${{ needs.build.outputs.version }}" >> .env
           docker compose down
           docker compose build
           docker compose up -d
