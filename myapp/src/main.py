@@ -116,6 +116,9 @@ if __name__ == "__main__":
     # 백그라운드 작업 실행
     executor = ThreadPoolExecutor(max_workers=2)
     executor.submit(resource_monitor.start_monitor)
+
+    # RSSBot 시작
+    bot.start()
     
     # Flask 서버 시작
     app.run(host='0.0.0.0', port=5000)
