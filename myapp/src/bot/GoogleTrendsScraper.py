@@ -1,110 +1,63 @@
+import os
 import time
 import pandas as pd
-from playwright.sync_api import sync_playwright
+from myapp.src.caawl_scripts.google_trends_crawl import crawl
+from myapp.src.clients.playwright_submit import submit_job, poll_job_status, get_job_results
+from playwright.async_api import async_playwright
+
 class Scraper:
     def __init__(self):
         pass
-        
-    def setup_browser(self, playwright):
-        browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        )
-        return browser, context
-        
-    def scrape_trends(self):
-        with sync_playwright() as playwright:
-            browser, context = self.setup_browser(playwright)
+
+    async def scrape_trends(self):
+        """
+        트렌드 데이터를 가져오는 메소드. 로컬 또는 서버에서 실행 가능.
+        환경 변수 'USE_SERVER'가 'true'이면 서버로 제출, 아니면 로컬에서 실행.
+        """
+        use_server = os.getenv('USE_SERVER', 'false').lower() == 'true'
+
+        if use_server:
+            return self.submit_to_server("google_trends_crawl")
+        else:
+            return await self.scrape_trends_local()
+
+    async def scrape_trends_local(self):
+        """
+        로컬에서 Playwright를 사용하여 트렌드 데이터를 스크랩합니다.
+        """
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
+            page = await context.new_page()
             try:
-                page = context.new_page()
-                page.goto("https://trends.google.co.kr/trending?geo=KR&hl=ko&hours=24")
-                # 페이지 로딩 대기
-                page.wait_for_selector("tbody[jsname='cC57zf']")
-                data = self._scrape_data(page)
-                return data
+                job_path = None
+                # await 로 crawl 함수 호출
+                data_dict = await crawl(page, context, job_path)
+                # 로컬에서는 실제 데이터만 반환하거나, 전체 dict 반환 결정
+                if data_dict.get('status') == 'success':
+                    return data_dict
+                else:
+                    return {"error": data_dict.get('error', 'Crawling failed locally')}
             finally:
-                browser.close()
-                
-    def _scrape_data(self, page):
-        data = []
-        while True:
-            tr_count = 0
-            # 데이터 추출
-            tr_elements = page.query_selector_all("tbody[jsname='cC57zf'] tr[jsname='oKdM2c']")
-            
-            for tr in tr_elements:
-                tr.click()
-                # 클릭 후 상세 정보가 로드될 때까지 대기
-                page.wait_for_selector(".EMz5P", timeout=10000)
-                time.sleep(0.5)  # 데이터 로드를 위한 짧은 대기
-                trend_data = self._extract_trend_data(tr, page)
-                data.append(trend_data)
-                tr_count += 1
+                await browser.close() 
 
-            # 데이터가 25개 미만이면 "다음" 버튼 클릭
-            if tr_count >= 25:
-                try:
-                    next_button = page.query_selector("button[jsname='ViaHrd']")
-                    if next_button:
-                        next_button.click()
-                        time.sleep(1)  # 버튼 클릭 후 로딩 대기
-                    else:
-                        break  # 버튼이 없으면 종료
-                except Exception:
-                    break  # 예외 발생 시 종료
+    def submit_to_server(self, job_name: str):
+        """
+        crawl.py를 서버에 제출하여 크롤링 작업을 수행하도록 합니다.
+        """
+        script_path = "../crawl_scripts/crawl.py"
+        job_id = submit_job(script_path, job_name)
+        if job_id:
+            final_status = poll_job_status(job_id)
+            if final_status == 'COMPLETED':
+                results = get_job_results(job_id)
+                return results.get('result') if results else {"error": "No results returned"}
             else:
-                break  # 데이터가 25개 이상이면 종료
-
-        return data
-
-        
-    def _extract_trend_data(self, tr, page):
-        trend_title = tr.query_selector(".mZ3RIc").inner_text()
-        search_volume = tr.query_selector(".lqv0Cb").inner_text()
-        
-        try:
-            status_element = tr.query_selector(".UQMqQd")
-            active_status = status_element.inner_text() if status_element else "N/A"
-            if "활성" in active_status:
-                active_status = "N/A"
-        except:
-            active_status = "N/A"
-            
-        try:
-            emz5p_element = page.query_selector(".EMz5P")
-            analysis_elements = emz5p_element.query_selector_all("div.HLcRPe span[jsname='V67aGc']")
-            trend_analysis = [element.inner_text() for element in analysis_elements if element.inner_text().strip()]
-        except:
-            trend_analysis = []
-            
-        try:
-            news_data = self._extract_news_data(emz5p_element)
-        except:
-            news_data = []
-            
-        return {
-            "트렌드 제목": trend_title,
-            "검색량": search_volume,
-            "트렌드 분석": trend_analysis,
-            "뉴스 데이터": news_data,
-            "활성 상태": active_status
-        }
-        
-    def _extract_news_data(self, emz5p_element):
-        news_data = []
-        news_elements = emz5p_element.query_selector_all(
-            "div[jsaction='click:vx9mmb;contextmenu:rbJKIe']"
-        )
-        
-        for news in news_elements:
-            try:
-                news_title = news.query_selector(".QbLC8c").inner_text()
-                news_url = news.query_selector("a").get_attribute("href")
-                news_data.append({"뉴스 제목": news_title, "URL": news_url})
-            except:
-                continue
-                
-        return news_data
+                return {"error": f"Job did not complete successfully. Final status: {final_status}"}
+        else:
+            return {"error": "Failed to submit job."}
 
 if __name__ == "__main__":
     app = Scraper()
