@@ -87,7 +87,7 @@ jobs:
           echo "FLUENTD_URL=${{ secrets.FLUENTD_URL }}" >> .env
           echo "VERSION=${{ needs.build.outputs.version }}" >> .env
           echo "PLAYWRIGHT_URL=${{ secrets.PLAYWRIGHT_URL }}" >> .env
-          echo "USE_SERVER=${{ variables.USE_SERVER  }}" >> .env
+          echo "USE_SERVER=${{ vars.USE_SERVER  }}" >> .env
           docker compose down
           docker compose build
           docker compose up -d
