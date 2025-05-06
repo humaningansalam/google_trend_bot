@@ -19,7 +19,7 @@ class Bot:
     def job(self):
         with self.pmetrics.request_time.time():
             try:
-                entries = self.rss_parser.parse("https://trends.google.com/trends/trendingsearches/daily/rss?geo=KR")
+                entries = self.rss_parser.parse("https://trends.google.com/trending/rss?geo=KR")
                 for entry in entries:
                     if entry['title'] not in self.trend_dict:
                         message = f"{entry['title']}\n{entry['content']}\n{entry['link']}\n{entry['published']}"
