@@ -1,7 +1,7 @@
 import os
 import time
 import pandas as pd
-from myapp.src.caawl_scripts.google_trends_crawl import crawl
+from myapp.src.crawl_scripts.google_trends_crawl import crawl
 from myapp.src.clients.playwright_submit import submit_job, poll_job_status, get_job_results
 from playwright.async_api import async_playwright
 
@@ -9,17 +9,33 @@ class Scraper:
     def __init__(self):
         pass
 
-    async def scrape_trends(self):
-        """
-        트렌드 데이터를 가져오는 메소드. 로컬 또는 서버에서 실행 가능.
-        환경 변수 'USE_SERVER'가 'true'이면 서버로 제출, 아니면 로컬에서 실행.
+    async def _get_raw_scrape_result(self):
+        """로컬 또는 서버에서 크롤링 결과를 가져오는 내부 헬퍼 메소드.
+           crawl.py의 반환값과 동일한 형식의 dict를 반환 (예: {'status': 'success', 'data': [...]})
+           또는 에러 발생 시 {'error': '...'} 형태의 dict를 반환.
         """
         use_server = os.getenv('USE_SERVER', 'false').lower() == 'true'
-
         if use_server:
             return self.submit_to_server("google_trends_crawl")
         else:
             return await self.scrape_trends_local()
+
+    async def scrape_trends(self):
+        """
+        트렌드 데이터를 가져오는 메소드.
+        최종적으로 실제 트렌드 데이터 리스트 또는 에러 정보를 담은 dict를 반환.
+        """
+        raw_result = await self._get_raw_scrape_result()
+
+        if not isinstance(raw_result, dict):
+            return {"error": f"Scraping did not return a dictionary: {raw_result}"}
+
+        if raw_result.get('status') == 'success' and 'data' in raw_result:
+            return raw_result['data']
+        elif 'error' in raw_result:
+            return {"error": raw_result['error']}
+        else:
+            return {"error": f"Scraping failed or returned unexpected format: {raw_result}"}
 
     async def scrape_trends_local(self):
         """
@@ -47,7 +63,7 @@ class Scraper:
         """
         crawl.py를 서버에 제출하여 크롤링 작업을 수행하도록 합니다.
         """
-        script_path = "../crawl_scripts/crawl.py"
+        script_path = "myapp/src/crawl_scripts/google_trends_crawl.py"
         job_id = submit_job(script_path, job_name)
         if job_id:
             final_status = poll_job_status(job_id)

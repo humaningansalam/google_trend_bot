@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "google-trend-bot"
-version = "0.2.1"
+version = "0.2.2"
 description = ""
 authors = ["humaningansalam"]
 readme = "README.md"
@@ -13,7 +13,7 @@ schedule = "^1.2.2"
 fluent-logger = "^0.11.1"
 prometheus-client = "^0.21.0"
 feedparser = "^6.0.11"
-flask = "^3.0.3"
+flask = {version = "^3.0.3", extras = ["async"]}
 psutil = "^6.1.0"
 pytest = "^8.3.3"
 pandas = "^2.2.3"

@@ -11,30 +11,47 @@ async def crawl(page: Page, context: BrowserContext, job_path: str):
         # 페이지 이동 및 초기 설정
         await page.goto(
             "https://trends.google.co.kr/trending?geo=KR&hl=ko&hours=24",
-            wait_until="networkidle",
-            timeout=60000
+            wait_until="domcontentloaded",
+            timeout=90000
         )
-        await page.wait_for_selector("tbody[jsname='cC57zf']")
+        await page.wait_for_selector("tbody[jsname='cC57zf']", timeout=60000)
 
         # 크롤링 실행
         data = []
         while True:
             tr_elements = await page.query_selector_all("tbody[jsname='cC57zf'] tr[jsname='oKdM2c']")
             
-            for tr in tr_elements:
-                await tr.click()
-                await page.wait_for_selector(".EMz5P", timeout=10000)
+            items_processed_on_this_page = 0
+            for tr_index, tr in enumerate(tr_elements): 
+                try:
+                    await tr.click()
+                    await page.wait_for_selector(".EMz5P", timeout=15000)
+                except Exception as e_click_wait:
+                    logging.warning(f"Error clicking or waiting for details on item {tr_index + 1} on page {page_num}: {e_click_wait}")
+                    continue 
+
                 trend_data = await _extract_trend_data(tr, page)
                 data.append(trend_data)
+                items_processed_on_this_page += 1
+                logging.info(f"Collected item {len(data)}: {trend_data.get('트렌드 제목')}")
 
-            # 다음 페이지 처리
+            # 다음 페이지로 넘어갈지 결정
             next_button = await page.query_selector("button[jsname='ViaHrd']")
-            if next_button and len(data) < 25:
-                await next_button.click()
-                await page.wait_for_timeout(1000)
-            else:
-                break
 
+            if not next_button:
+                logging.info("Next button not found. Assuming end of pages.")
+                break 
+
+            is_next_button_disabled = await next_button.is_disabled()
+            if is_next_button_disabled:
+                logging.info("Next button is disabled. Assuming end of pages.")
+                break 
+
+            logging.info("Next button is active. Clicking to go to the next page.")
+            await next_button.click()
+            await page.wait_for_timeout(2000) 
+
+        logging.info(f"Finished crawling. Collected {len(data)} items.")
         return {
             'status': 'success',
             'data': data,

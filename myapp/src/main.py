@@ -55,7 +55,7 @@ def create_app(
         return jsonify({"status": "Trend reset completed"}), 200
 
     @app.route('/trends', methods=['GET'])
-    def get_trends():
+    async def get_trends():
         """트렌드 스크랩 동작"""
         if not app.scraper:
             return jsonify({
@@ -64,7 +64,7 @@ def create_app(
             }), 400
             
         try:
-            trends_data = app.scraper.scrape_trends()
+            trends_data = await app.scraper.scrape_trends()
             return jsonify({
                 "status": "success",
                 "data": trends_data
