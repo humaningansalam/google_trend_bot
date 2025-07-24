@@ -72,7 +72,8 @@ async def _extract_trend_data(tr, page):
 
     # 트렌드 분석 데이터
     emz5p = await page.query_selector(".EMz5P")
-    analysis_elems = await emz5p.query_selector_all("div.HLcRPe span[jsname='V67aGc']")
+    selector = "span[jsname='V67aGc']:not([aria-hidden='true'])"
+    analysis_elems = await emz5p.query_selector_all(selector)
     trend_analysis = [await elem.inner_text() for elem in analysis_elems]
 
     # 뉴스 데이터
