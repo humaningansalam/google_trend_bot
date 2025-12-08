@@ -1,4 +1,5 @@
-# crawl.py
+# src/crawl_scripts/google_trends_crawl.py
+
 from playwright.async_api import Page, BrowserContext
 import logging
 import os

@@ -1,9 +1,12 @@
+#src/bot/scraper.py
+
 import os
 import time
 import pandas as pd
-from myapp.src.crawl_scripts.google_trends_crawl import crawl
-from myapp.src.clients.playwright_submit import submit_job, poll_job_status, get_job_results
 from playwright.async_api import async_playwright
+
+from src.crawl_scripts.google_trends_crawl import crawl
+from src.clients.playwright_submit import submit_job, poll_job_status, get_job_results
 
 class Scraper:
     def __init__(self):
