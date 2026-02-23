@@ -66,7 +66,13 @@ class Scraper:
         """
         crawl.py를 서버에 제출하여 크롤링 작업을 수행하도록 합니다.
         """
-        script_path = "myapp/src/crawl_scripts/google_trends_crawl.py"
+        script_path = os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "crawl_scripts",
+            "google_trends_crawl.py",
+        )
+        script_path = os.path.normpath(script_path)
         job_id = submit_job(script_path, job_name)
         if job_id:
             final_status = poll_job_status(job_id)

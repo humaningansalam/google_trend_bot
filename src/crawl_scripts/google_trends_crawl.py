@@ -19,17 +19,21 @@ async def crawl(page: Page, context: BrowserContext, job_path: str):
 
         # 크롤링 실행
         data = []
-        while True:
+        max_pages = 5
+        current_page = 1
+        while current_page <= max_pages:
             tr_elements = await page.query_selector_all("tbody[jsname='cC57zf'] tr[jsname='oKdM2c']")
-            
+
             items_processed_on_this_page = 0
-            for tr_index, tr in enumerate(tr_elements): 
+            for tr_index, tr in enumerate(tr_elements):
                 try:
                     await tr.click()
                     await page.wait_for_selector(".EMz5P", timeout=15000)
                 except Exception as e_click_wait:
-                    logging.warning(f"Error clicking or waiting for details on item {tr_index + 1} on page {page_num}: {e_click_wait}")
-                    continue 
+                    logging.warning(
+                        f"Error clicking or waiting for details on item {tr_index + 1}: {e_click_wait}"
+                    )
+                    continue
 
                 trend_data = await _extract_trend_data(tr, page)
                 data.append(trend_data)
@@ -41,16 +45,21 @@ async def crawl(page: Page, context: BrowserContext, job_path: str):
 
             if not next_button:
                 logging.info("Next button not found. Assuming end of pages.")
-                break 
+                break
 
             is_next_button_disabled = await next_button.is_disabled()
             if is_next_button_disabled:
                 logging.info("Next button is disabled. Assuming end of pages.")
-                break 
+                break
+
+            if current_page >= max_pages:
+                logging.warning(f"Reached max_pages={max_pages}. Stopping crawl.")
+                break
 
             logging.info("Next button is active. Clicking to go to the next page.")
             await next_button.click()
-            await page.wait_for_timeout(2000) 
+            await page.wait_for_timeout(2000)
+            current_page += 1
 
         logging.info(f"Finished crawling. Collected {len(data)} items.")
         return {

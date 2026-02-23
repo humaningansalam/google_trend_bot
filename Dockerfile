@@ -34,6 +34,9 @@ RUN uv sync --frozen --python 3.11 --no-install-project && \
         uv sync --frozen --python 3.11 --group dev --no-install-project; \
     fi
 
+# Playwright용 Chromium 브라우저 설치 (의존성 포함)
+RUN uv run playwright install --with-deps chromium
+
 COPY . .
 
 ENV PATH="/usr/src/app/.venv/bin:$PATH"
