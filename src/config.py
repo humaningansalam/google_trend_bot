@@ -9,5 +9,8 @@ class Config:
     
     # 모니터링 설정 (Loki)
     LOKI_URL = os.getenv('LOKI_URL', None)
-    LOKI_TAGS = {"app": "trends-bot", "env": "prod"}
+    LOKI_TAGS = {
+        "app": os.getenv("APP_NAME", "trends-bot"),
+        "env": os.getenv("APP_ENV", "dev")
+    }
     LOG_FILE = "./logs/bot.log"
