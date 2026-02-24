@@ -1,25 +1,24 @@
-[tool.poetry]
+[project]
 name = "google-trend-bot"
-version = "0.2.3"
-description = ""
-authors = ["humaningansalam"]
+version = "0.3.1"
+description = "Add your description here"
 readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "feedparser>=6.0.12",
+    "pandas>=2.3.3",
+    "playwright>=1.56.0",
+    "pytz>=2025.2",
+    "requests>=2.32.5",
+    "schedule>=1.2.2",
+    "his-monitoring",
+    "prometheus-client>=0.23.1",
+    "flask[async]>=3.1.2",
+]
+[tool.uv.sources]
+his-monitoring = { git = "https://github.com/humaningansalam/his-monitoring.git", branch = "main" }
 
-[tool.poetry.dependencies]
-python = "==3.10.*"
-pytz = "^2024.2"
-requests = "^2.32.3"
-schedule = "^1.2.2"
-fluent-logger = "^0.11.1"
-prometheus-client = "^0.21.0"
-feedparser = "^6.0.11"
-flask = {version = "^3.0.3", extras = ["async"]}
-psutil = "^6.1.0"
-pytest = "^8.3.3"
-pandas = "^2.2.3"
-playwright = "^1.48.0"
-
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
