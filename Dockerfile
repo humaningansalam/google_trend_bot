@@ -5,8 +5,10 @@ ARG INSTALL_DEV=false
 
 ENV VERSION=$VERSION
 ENV SLACK_WEBHOOK=api_key
-ENV FLUENTD_URL=fluentd_url
+ENV LOKI_URL=loki_url
 ENV LOG_LEVEL=INFO
+ENV SCHEDULE_INTERVAL=10
+ENV CONTROL_TOKEN=
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
@@ -16,7 +18,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     git \
     wget \
-    unzip \ 
+    unzip \
     curl \
     ca-certificates \
     libglib2.0-0 libnss3 libnspr4 libdbus-1-3 libatk1.0-0 \
@@ -34,7 +36,6 @@ RUN uv sync --frozen --python 3.11 --no-install-project && \
         uv sync --frozen --python 3.11 --group dev --no-install-project; \
     fi
 
-# Playwright용 Chromium 브라우저 설치 (의존성 포함)
 RUN uv run playwright install --with-deps chromium
 
 COPY . .
