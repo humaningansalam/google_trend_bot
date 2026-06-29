@@ -11,6 +11,7 @@ Google Trends alerts for Slack with a small Flask control surface.
 ## Environment variables
 
 - `SLACK_WEBHOOK`: Slack incoming webhook URL.
+- `VERSION`: Container image tag used by Compose, default `0.3.2` in `.env.example`.
 - `LOKI_URL`: Loki push endpoint used by logging.
 - `SCHEDULE_INTERVAL`: RSS polling interval in minutes. Must be a positive integer.
 - `CONTROL_TOKEN`: Optional bearer token for `/start`, `/stop`, and `/reset`. When unset, those endpoints keep their current local behavior.
@@ -28,8 +29,8 @@ Google Trends alerts for Slack with a small Flask control surface.
 
 ## Docker and Compose
 
-- `Dockerfile` sets the same runtime defaults as `.env.example`, including `LOKI_URL` and `SCHEDULE_INTERVAL`.
-- `docker-compose.yml` expects an `.env` file beside it and publishes the app on port `12025`.
+- `Dockerfile` provides container fallback values for `LOKI_URL` and `SCHEDULE_INTERVAL`; `.env` remains the Compose runtime source of truth.
+- `docker-compose.yml` expects an `.env` file beside it, including `VERSION`, and publishes the app on port `12025`.
 - The container listens on port `5000` internally.
 
 ## Endpoints

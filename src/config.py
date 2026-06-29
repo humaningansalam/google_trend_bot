@@ -16,7 +16,7 @@ class Config:
     CONTROL_TOKEN = os.getenv("CONTROL_TOKEN")
     LOKI_URL = os.getenv("LOKI_URL")
     LOKI_TAGS = {
-        "app": os.getenv("APP_NAME", "trends-bot"),
+        "app": os.getenv("APP_NAME", "google-trend-bot"),
         "env": os.getenv("APP_ENV", "dev"),
     }
     LOG_FILE = "./logs/bot.log"

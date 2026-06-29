@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      version: ${{ steps.get_version.outputs.version }}
+      version: ${{ steps.get_version.outputs.VERSION }}
 
     steps:
     - uses: actions/checkout@v3
@@ -40,7 +40,7 @@ jobs:
           done
           echo "Service did not start in time"
           exit 1
-    
+
     - name: Check Docker logs (if failed)
       if: failure()
       run: docker logs myapp_container

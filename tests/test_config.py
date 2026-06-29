@@ -18,6 +18,7 @@ def test_config_defaults(monkeypatch):
     assert module.Config.CONTROL_TOKEN is None
     assert module.Config.LOKI_URL is None
     assert module.Config.LOG_LEVEL == "INFO"
+    assert module.Config.LOKI_TAGS == {"app": "google-trend-bot", "env": "dev"}
 
 
 def test_config_invalid_schedule_interval_raises(monkeypatch):
