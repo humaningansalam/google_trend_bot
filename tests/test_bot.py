@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from threading import Barrier, Event, Thread
+from time import sleep
 from unittest.mock import Mock, patch
 
 from pytz import timezone
@@ -25,6 +26,103 @@ def test_bot_reset_trend(test_bot):
     test_bot.reset_trend()
     assert len(test_bot.trend_dict) == 1
     assert "New Trend" in test_bot.trend_dict
+
+
+def test_bot_job_deduplicates_trends_within_memory_window(test_bot, mock_send_alert):
+    test_bot.job()
+    test_bot.job()
+
+    mock_send_alert.assert_called_once()
+
+
+def test_bot_reset_does_not_raise_when_run_concurrently_with_job(test_bot, client, mock_rss_parser):
+    should_stop = Event()
+    counter = {"i": 0}
+
+    def parse(*_args, **_kwargs):
+        counter["i"] += 1
+        return [
+            {
+                "title": f"trend-{counter['i']}",
+                "content": "dup",
+                "link": "http://example.com",
+                "published": "now",
+                "parsed_time": datetime.now(timezone("Asia/Seoul")),
+            }
+        ]
+
+    mock_rss_parser.parse.side_effect = parse
+
+    def mutate_trend_memory():
+        while not should_stop.is_set():
+            test_bot.job()
+
+    worker = Thread(target=mutate_trend_memory, daemon=True)
+    worker.start()
+
+    try:
+        for _ in range(200):
+            response = client.post("/reset")
+            assert response.status_code == 200
+            sleep(0)
+    finally:
+        should_stop.set()
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+
+
+def test_bot_job_does_not_mark_new_trend_on_send_failure(test_bot, mock_send_alert):
+    mock_send_alert.side_effect = RuntimeError("Slack API failure")
+
+    test_bot.job()
+
+    assert "Test Trend" not in test_bot.trend_dict
+    mock_send_alert.assert_called_once()
+
+
+def test_bot_job_retries_on_send_failure_then_marks_trend_on_success(test_bot, mock_send_alert):
+    mock_send_alert.side_effect = [RuntimeError("Slack API failure"), None]
+
+    test_bot.job()
+    test_bot.job()
+
+    assert "Test Trend" in test_bot.trend_dict
+    assert mock_send_alert.call_count == 2
+
+
+def test_bot_job_handles_parser_error_without_unbound_local_error_and_cleans_pending_titles(test_bot, mock_rss_parser, mock_send_alert):
+    mock_rss_parser.parse.side_effect = RuntimeError("parser failure")
+
+    test_bot.job()
+
+    mock_send_alert.assert_not_called()
+    assert not test_bot._pending_titles
+
+
+def test_bot_job_cleans_pending_titles_when_send_alert_fails(test_bot, mock_rss_parser, mock_send_alert):
+    mock_rss_parser.parse.return_value = [
+        {
+            "title": "Trend A",
+            "content": "first",
+            "link": "http://example.com/1",
+            "published": "now",
+            "parsed_time": datetime.now(timezone("Asia/Seoul")),
+        },
+        {
+            "title": "Trend B",
+            "content": "second",
+            "link": "http://example.com/2",
+            "published": "now",
+            "parsed_time": datetime.now(timezone("Asia/Seoul")),
+        },
+    ]
+    mock_send_alert.side_effect = [None, RuntimeError("Slack API failure")]
+
+    test_bot.job()
+
+    assert "Trend A" in test_bot.trend_dict
+    assert "Trend B" not in test_bot.trend_dict
+    assert not test_bot._pending_titles
 
 
 def test_bot_start_stop(test_bot):

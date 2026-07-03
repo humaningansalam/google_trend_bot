@@ -25,7 +25,7 @@ jobs:
     - name: Test
       run: |
         sleep 60
-        curl http://localhost:5000/health
+        curl -fsS http://localhost:5000/health > /dev/null
 
     - name: action-slack
       uses: 8398a7/action-slack@v3

@@ -20,6 +20,8 @@ class RSSBot:
         self.thread = None
         self._stop_event = Event()
         self._state_lock = Lock()
+        self._trend_lock = Lock()
+        self._pending_titles = set()
         self._scheduler = schedule.Scheduler()
         self.trend_dict = {}
         self.logger = logging.getLogger("RSSBot")
@@ -43,26 +45,50 @@ class RSSBot:
             return self._is_worker_alive()
 
     def job(self):
+        new_entries = []
         with metrics.request_time.time():
             try:
-                entries = self.rss_parser.parse("https://trends.google.com/trending/rss?geo=KR")
-                for entry in entries:
-                    if entry["title"] not in self.trend_dict:
-                        message = f"{entry['title']}\n{entry['content']}\n{entry['link']}\n{entry['published']}"
+                entries = list(
+                    self.rss_parser.parse("https://trends.google.com/trending/rss?geo=KR")
+                )
+                with self._trend_lock:
+                    for entry in entries:
+                        title = entry["title"]
+                        if title in self.trend_dict or title in self._pending_titles:
+                            continue
+                        self._pending_titles.add(title)
+                        new_entries.append(entry)
+
+                for entry in new_entries:
+                    message = f"{entry['title']}\n{entry['content']}\n{entry['link']}\n{entry['published']}"
+                    try:
                         send_alert(message)
-                        self.logger.info(f"Trend Found: {entry['title']}", extra={"trend": entry})
-                        self.trend_dict[entry["title"]] = entry["parsed_time"]
-                        metrics.get_trend_data.inc()
+                        with self._trend_lock:
+                            self.trend_dict[entry["title"]] = entry["parsed_time"]
+                            self._pending_titles.discard(entry["title"])
+                            metrics.get_trend_data.inc()
+                        self.logger.info(
+                            f"Trend Found: {entry['title']}", extra={"trend": entry}
+                        )
+                    except Exception:
+                        with self._trend_lock:
+                            self._pending_titles.discard(entry["title"])
+                        raise
+
                 metrics.completed_jobs.inc()
             except Exception:
+                with self._trend_lock:
+                    self._pending_titles.difference_update({entry["title"] for entry in new_entries})
                 self.logger.error("Error in job execution", exc_info=True)
                 metrics.inc_error("job_execution_error")
 
     def reset_trend(self):
         current_time = datetime.now(timezone("Asia/Seoul"))
         three_days_ago = current_time - timedelta(days=3)
-        self.trend_dict = {k: v for k, v in self.trend_dict.items() if v > three_days_ago}
-        self.logger.info(f"Trend reset completed. Items remaining: {len(self.trend_dict)}")
+        with self._trend_lock:
+            self.trend_dict = {k: v for k, v in self.trend_dict.items() if v > three_days_ago}
+            remaining = len(self.trend_dict)
+        self.logger.info(f"Trend reset completed. Items remaining: {remaining}")
 
     def run(self):
         while not self._stop_event.is_set():
