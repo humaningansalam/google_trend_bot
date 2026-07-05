@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 from playwright.async_api import async_playwright
@@ -72,7 +73,11 @@ class Scraper:
         return {"status": "error", "message": "Failed to submit job."}
 
 
-if __name__ == "__main__":
+def main():
     app = Scraper()
-    trends_data = app.scrape_trends()
+    trends_data = asyncio.run(app.scrape_trends())
     print(trends_data)
+
+
+if __name__ == "__main__":
+    main()

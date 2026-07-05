@@ -1,5 +1,6 @@
 import asyncio
 
+from src.bot import scraper as scraper_module
 from src.bot.scraper import Scraper
 
 
@@ -29,3 +30,15 @@ def test_scraper_error_shape(monkeypatch):
 
     result = asyncio.run(scraper.scrape_trends())
     assert result == {"status": "error", "message": "boom"}
+
+
+def test_scraper_module_entrypoint_awaits_scrape(monkeypatch, capsys):
+    async def scrape_trends(self):
+        return {"status": "success", "data": [{"trend": "Entry Trend"}]}
+
+    monkeypatch.setattr(Scraper, "scrape_trends", scrape_trends)
+
+    scraper_module.main()
+
+    expected = "{'status': 'success', 'data': [{'trend': 'Entry Trend'}]}"
+    assert capsys.readouterr().out.strip() == expected
