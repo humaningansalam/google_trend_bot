@@ -1,7 +1,7 @@
 [project]
 name = "google-trend-bot"
 version = "0.3.2"
-description = "Add your description here"
+description = "Google Trends alerts for Slack with a Flask control surface"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
