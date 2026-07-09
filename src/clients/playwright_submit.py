@@ -9,7 +9,7 @@ import logging
 from typing import List, Dict, Any, Optional
 
 # 서버 URL 설정 
-SERVER_URL = os.getenv('PLAYWRIGHT_URL', 'http://localhost:5000') 
+SERVER_URL = os.getenv('PLAYWRIGHT_URL', 'http://localhost:3000')
 POLL_INTERVAL_SECONDS = 10 # 상태 확인 간격 
 MAX_POLL_ATTEMPTS = 60 # 최대 상태 확인 횟수 
 
