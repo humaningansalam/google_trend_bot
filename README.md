@@ -11,7 +11,7 @@ Google Trends alerts for Slack with a small Flask control surface.
 ## Environment variables
 
 - `SLACK_WEBHOOK`: Slack incoming webhook URL.
-- `VERSION`: Container image tag used by Compose, default `0.3.2` in `.env.example`.
+- `VERSION`: Container image tag used by Compose, default `0.3.3` in `.env.example`.
 - `LOKI_URL`: Loki push endpoint used by logging.
 - `SCHEDULE_INTERVAL`: RSS polling interval in minutes. Must be a positive integer.
 - `CONTROL_TOKEN`: Optional bearer token for `/start`, `/stop`, and `/reset`. When unset, those endpoints keep their current local behavior.
