@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      version: ${{ steps.get_version.outputs.version }}
+      version: ${{ steps.get_version.outputs.VERSION }}
 
     steps:
     - uses: actions/checkout@v3
@@ -31,7 +31,7 @@ jobs:
     - name: Test Service
       run: |
           for i in {1..10}; do
-            if curl -s http://localhost:5000/health; then
+            if curl -fsS http://localhost:5000/health > /dev/null; then
               echo "Service is up!"
               exit 0
             fi
@@ -40,7 +40,7 @@ jobs:
           done
           echo "Service did not start in time"
           exit 1
-    
+
     - name: Check Docker logs (if failed)
       if: failure()
       run: docker logs myapp_container
@@ -104,4 +104,3 @@ jobs:
       env:
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_ALARM }} # required
       if: always() # Pick up events even if the job fails or is canceled.
-

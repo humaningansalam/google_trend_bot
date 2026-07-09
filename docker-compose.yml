@@ -1,24 +1,24 @@
 services:
   google_trend_bot:
-      build: 
-        context: .
-        args:
-          VERSION: ${VERSION}
-        tags:
-          - "google_trend_bot:${VERSION}"
-      container_name: google_trend_bot
-      restart: unless-stopped
-      networks:
-        - bridge_server
-      ports:
-        - 12025:5000
-      env_file:
-        - .env
-      logging:
-        driver: "json-file"
-        options:
-          max-size: "2m"
-          max-file: "5"
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION}
+      tags:
+        - "google_trend_bot:${VERSION}"
+    container_name: google_trend_bot
+    restart: unless-stopped
+    networks:
+      - bridge_server
+    ports:
+      - 12025:5000
+    env_file:
+      - .env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "2m"
+        max-file: "5"
 
 networks:
   bridge_server:
