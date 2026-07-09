@@ -69,6 +69,13 @@ class Scraper:
                 if isinstance(result, dict):
                     return {"status": "error", "message": result.get("message", result.get("error", "Scraping failed on server"))}
                 return {"status": "error", "message": "No results returned"}
+            # FAILED/TIMEOUT: try to get detailed error from server
+            results = get_job_results(job_id)
+            result = results.get("result") if results else None
+            if isinstance(result, dict) and "message" in result:
+                return {"status": "error", "message": result["message"]}
+            if isinstance(result, dict) and "error" in result:
+                return {"status": "error", "message": result["error"]}
             return {"status": "error", "message": f"Job did not complete successfully. Final status: {final_status}"}
         return {"status": "error", "message": "Failed to submit job."}
 
