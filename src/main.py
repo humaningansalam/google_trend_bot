@@ -42,12 +42,10 @@ def create_app(bot=None, scraper=None):
             return unauthorized
         if not app.bot:
             return jsonify({"status": "Bot not initialized"}), 400
-        if app.bot.is_running:
-            stopped = app.bot.stop()
-            if stopped:
-                return jsonify({"status": "Bot stopped", "state": "stopped"}), 200
-            return jsonify({"status": "Bot stop timed out", "state": "stopping"}), 200
-        return jsonify({"status": "Bot is already stopped"}), 400
+        stopped = app.bot.stop()
+        if stopped:
+            return jsonify({"status": "Bot stopped", "state": "stopped"}), 200
+        return jsonify({"status": "Bot stop timed out", "state": "stopping"}), 200
 
     @app.route("/reset", methods=["POST"])
     def reset_trend():

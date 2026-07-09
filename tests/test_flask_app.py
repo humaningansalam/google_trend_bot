@@ -42,6 +42,13 @@ def test_stop_bot(client):
     assert data == {"status": "Bot stopped", "state": "stopped"}
 
 
+def test_stop_bot_is_idempotent_when_already_stopped(client):
+    response = client.post("/stop")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "Bot stopped", "state": "stopped"}
+
+
 def test_stop_bot_reports_timeout_state(client):
     client.application.bot.stop = Mock(return_value=False)
     client.post("/start")
