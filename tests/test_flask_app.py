@@ -181,3 +181,13 @@ def test_get_trends_returns_json_on_malformed_result(client, result):
     response = client.get("/trends")
     assert response.status_code == 502
     assert response.get_json() == {"status": "error", "message": "Failed to fetch trends"}
+
+
+@pytest.mark.parametrize("result", [{"status": "error"}, {"status": "success"}])
+def test_get_trends_rejects_incomplete_status_payloads(client, result):
+    client.application.scraper.scrape_trends = Mock(return_value=result)
+
+    response = client.get("/trends")
+
+    assert response.status_code == 502
+    assert response.get_json() == {"status": "error", "message": "Failed to fetch trends"}

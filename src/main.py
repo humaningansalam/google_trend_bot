@@ -69,10 +69,10 @@ def create_app(bot=None, scraper=None):
             return jsonify({"status": "error", "message": "Failed to fetch trends"}), 502
         if not isinstance(result, dict):
             return jsonify({"status": "error", "message": "Failed to fetch trends"}), 502
-        if result.get("status") == "success":
-            return jsonify(result), 200
-        if result.get("status") == "error":
-            return jsonify(result), 502
+        if result.get("status") == "success" and "data" in result:
+            return jsonify({"status": "success", "data": result["data"]}), 200
+        if result.get("status") == "error" and isinstance(result.get("message"), str):
+            return jsonify({"status": "error", "message": result["message"]}), 502
         return jsonify({"status": "error", "message": "Failed to fetch trends"}), 502
 
     @app.route("/metrics")
