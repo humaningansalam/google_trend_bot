@@ -1,5 +1,6 @@
 from flask import Flask, Response, jsonify, request
 from prometheus_client import generate_latest
+from werkzeug.exceptions import HTTPException
 
 from his_mon import ResourceMonitor, init_webhook, setup_logging
 
@@ -14,6 +15,15 @@ def create_app(bot=None, scraper=None):
     app = Flask(__name__)
     app.bot = bot
     app.scraper = scraper
+
+    @app.errorhandler(HTTPException)
+    def handle_http_error(error):
+        return jsonify({"status": "error", "message": error.description}), error.code
+
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(error):
+        app.logger.exception("Unhandled request error", exc_info=error)
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     def authorize_control_request():
         control_token = Config.CONTROL_TOKEN
@@ -30,10 +40,10 @@ def create_app(bot=None, scraper=None):
         if unauthorized:
             return unauthorized
         if not app.bot:
-            return jsonify({"status": "Bot not initialized"}), 400
+            return jsonify({"status": "error", "message": "Bot not initialized"}), 400
         if app.bot.start():
             return jsonify({"status": "Bot started"}), 200
-        return jsonify({"status": "Bot is already running"}), 400
+        return jsonify({"status": "error", "message": "Bot is already running"}), 400
 
     @app.route("/stop", methods=["POST"])
     def stop_bot():
@@ -41,7 +51,7 @@ def create_app(bot=None, scraper=None):
         if unauthorized:
             return unauthorized
         if not app.bot:
-            return jsonify({"status": "Bot not initialized"}), 400
+            return jsonify({"status": "error", "message": "Bot not initialized"}), 400
         stopped = app.bot.stop()
         if stopped:
             return jsonify({"status": "Bot stopped", "state": "stopped"}), 200
@@ -53,7 +63,7 @@ def create_app(bot=None, scraper=None):
         if unauthorized:
             return unauthorized
         if not app.bot:
-            return jsonify({"status": "Bot not initialized"}), 400
+            return jsonify({"status": "error", "message": "Bot not initialized"}), 400
         app.bot.reset_trend()
         return jsonify({"status": "Trend reset completed"}), 200
 

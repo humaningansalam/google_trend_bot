@@ -16,6 +16,15 @@ def test_start_bot(client):
     assert data["status"] == "Bot started"
 
 
+def test_start_bot_returns_json_error_when_already_running(client):
+    client.post("/start")
+
+    response = client.post("/start")
+
+    assert response.status_code == 400
+    assert response.get_json() == {"status": "error", "message": "Bot is already running"}
+
+
 def test_start_bot_requires_token_when_configured(client, monkeypatch):
     monkeypatch.setattr("src.main.Config.CONTROL_TOKEN", "secret-token")
 
@@ -69,7 +78,7 @@ def test_start_bot_recovers_after_timed_out_stop(client):
     start_response = client.post("/start")
 
     assert start_response.status_code == 400
-    assert start_response.get_json() == {"status": "Bot is already running"}
+    assert start_response.get_json() == {"status": "error", "message": "Bot is already running"}
 
 
 def test_start_bot_recovers_once_old_worker_exits_after_timeout(client):
@@ -191,3 +200,39 @@ def test_get_trends_rejects_incomplete_status_payloads(client, result):
 
     assert response.status_code == 502
     assert response.get_json() == {"status": "error", "message": "Failed to fetch trends"}
+
+
+@pytest.mark.parametrize("path", ["/start", "/missing"])
+def test_routing_errors_use_json_error_shape(client, path):
+    response = client.get(path)
+
+    assert response.status_code in {404, 405}
+    assert response.mimetype == "application/json"
+    assert response.get_json()["status"] == "error"
+    assert isinstance(response.get_json()["message"], str)
+
+
+@pytest.mark.parametrize("path", ["/start", "/stop", "/reset"])
+def test_uninitialized_control_endpoints_use_json_error_shape(path):
+    from src.main import create_app
+
+    response = create_app().test_client().post(path)
+
+    assert response.status_code == 400
+    assert response.get_json() == {"status": "error", "message": "Bot not initialized"}
+
+
+def test_unhandled_endpoint_exception_uses_json_error_shape():
+    from src.main import create_app
+
+    app = create_app()
+
+    @app.route("/_test-boom")
+    def boom():
+        raise RuntimeError("boom")
+
+    response = app.test_client().get("/_test-boom")
+
+    assert response.status_code == 500
+    assert response.mimetype == "application/json"
+    assert response.get_json() == {"status": "error", "message": "Internal server error"}
