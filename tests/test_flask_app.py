@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -236,3 +236,31 @@ def test_unhandled_endpoint_exception_uses_json_error_shape():
     assert response.status_code == 500
     assert response.mimetype == "application/json"
     assert response.get_json() == {"status": "error", "message": "Internal server error"}
+
+
+def test_runtime_app_factory_starts_single_bot_and_monitor():
+    from src.main import create_runtime_app
+
+    bot = Mock()
+    scraper = Mock()
+    monitor = Mock()
+
+    with (
+        patch("src.main.init_webhook") as init_webhook,
+        patch("src.main.setup_logging") as setup_logging,
+        patch("src.main.RSSParser") as rss_parser,
+        patch("src.main.RSSBot", return_value=bot) as rss_bot,
+        patch("src.main.Scraper", return_value=scraper),
+        patch("src.main.ResourceMonitor", return_value=monitor) as resource_monitor,
+    ):
+        app = create_runtime_app()
+
+    init_webhook.assert_called_once()
+    setup_logging.assert_called_once()
+    rss_bot.assert_called_once_with(rss_parser.return_value, interval=10)
+    resource_monitor.assert_called_once()
+    monitor.start.assert_called_once_with()
+    bot.start.assert_called_once_with()
+    assert app.bot is bot
+    assert app.scraper is scraper
+    assert app.extensions["resource_monitor"] is monitor

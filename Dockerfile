@@ -8,7 +8,6 @@ ENV SLACK_WEBHOOK=api_key
 ENV LOKI_URL=loki_url
 ENV LOG_LEVEL=INFO
 ENV SCHEDULE_INTERVAL=10
-ENV CONTROL_TOKEN=
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
@@ -44,4 +43,4 @@ ENV PATH="/usr/src/app/.venv/bin:$PATH"
 
 EXPOSE 5000
 
-CMD ["python", "-m", "src.main"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "src.main:create_runtime_app()"]

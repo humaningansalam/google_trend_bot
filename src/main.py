@@ -96,7 +96,7 @@ def create_app(bot=None, scraper=None):
     return app
 
 
-if __name__ == "__main__":
+def create_runtime_app():
     init_webhook(url=Config.SLACK_WEBHOOK)
     setup_logging(
         level=Config.LOG_LEVEL,
@@ -113,6 +113,16 @@ if __name__ == "__main__":
 
     monitor = ResourceMonitor(metrics_obj=metrics, interval=5)
     monitor.start()
+    app.extensions["resource_monitor"] = monitor
 
     bot.start()
+    return app
+
+
+def main():
+    app = create_runtime_app()
     app.run(host="0.0.0.0", port=5000)
+
+
+if __name__ == "__main__":
+    main()

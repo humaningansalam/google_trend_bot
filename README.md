@@ -37,6 +37,7 @@ On Linux hosts that do not already have Chromium system libraries, run `uv run p
 - `Dockerfile` provides container fallback values for `LOKI_URL` and `SCHEDULE_INTERVAL`; `.env` remains the Compose runtime source of truth.
 - `docker-compose.yml` expects an `.env` file beside it, including `VERSION`, and publishes the app on port `12025`.
 - The container listens on port `5000` internally.
+- The container runs Gunicorn with one worker to keep the scheduler single-instance and four request threads so scraper calls do not block health and control requests.
 
 ## Endpoints
 
