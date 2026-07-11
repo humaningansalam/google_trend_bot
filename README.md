@@ -7,7 +7,9 @@ Google Trends alerts for Slack with a small Flask control surface.
 1. Copy `.env.example` to `.env` and fill in the required values.
 2. Install dependencies with `uv sync`.
 3. Install the Chromium browser used by the local scraper with `uv run playwright install chromium`.
-4. Start the service with `uv run python -m src.main`.
+4. Start the service with `uv run --env-file .env python -m src.main`.
+
+`uv run` does not load `.env` automatically, so keep the `--env-file .env` option when starting the service locally.
 
 On Linux hosts that do not already have Chromium system libraries, run `uv run playwright install --with-deps chromium` instead.
 
