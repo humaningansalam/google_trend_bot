@@ -3,7 +3,10 @@ from threading import Barrier, Event, Thread
 from time import sleep
 from unittest.mock import Mock, patch
 
+import requests
 from pytz import timezone
+
+from src.bot.rss_bot import RSSBot
 
 
 def test_bot_job(test_bot, mock_rss_parser, mock_send_alert):
@@ -88,6 +91,24 @@ def test_bot_job_retries_on_send_failure_then_marks_trend_on_success(test_bot, m
 
     assert "Test Trend" in test_bot.trend_dict
     assert mock_send_alert.call_count == 2
+
+
+def test_bot_retries_when_slack_returns_http_error(mock_rss_parser, monkeypatch):
+    response = Mock()
+    response.raise_for_status.side_effect = requests.HTTPError("Slack returned 500")
+    post = Mock(return_value=response)
+    monkeypatch.setattr("src.bot.rss_bot.requests.post", post)
+    bot = RSSBot(
+        rss_parser=mock_rss_parser,
+        interval=10,
+        webhook_url="https://hooks.slack.test/services/example",
+    )
+
+    bot.job()
+    bot.job()
+
+    assert post.call_count == 2
+    assert "Test Trend" not in bot.trend_dict
 
 
 def test_bot_job_handles_parser_error_without_unbound_local_error_and_cleans_pending_titles(test_bot, mock_rss_parser, mock_send_alert):

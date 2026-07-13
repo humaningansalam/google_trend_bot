@@ -266,18 +266,21 @@ def test_runtime_app_factory_starts_single_bot_and_monitor():
     monitor = Mock()
 
     with (
-        patch("src.main.init_webhook") as init_webhook,
         patch("src.main.setup_logging") as setup_logging,
         patch("src.main.RSSParser") as rss_parser,
         patch("src.main.RSSBot", return_value=bot) as rss_bot,
         patch("src.main.Scraper", return_value=scraper),
         patch("src.main.ResourceMonitor", return_value=monitor) as resource_monitor,
+        patch("src.main.Config.SLACK_WEBHOOK", "https://hooks.slack.test/example"),
     ):
         app = create_runtime_app()
 
-    init_webhook.assert_called_once()
     setup_logging.assert_called_once()
-    rss_bot.assert_called_once_with(rss_parser.return_value, interval=10)
+    rss_bot.assert_called_once_with(
+        rss_parser.return_value,
+        interval=10,
+        webhook_url="https://hooks.slack.test/example",
+    )
     resource_monitor.assert_called_once()
     monitor.start.assert_called_once_with()
     bot.start.assert_called_once_with()

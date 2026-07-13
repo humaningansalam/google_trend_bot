@@ -25,8 +25,7 @@ def mock_rss_parser():
 
 @pytest.fixture
 def mock_send_alert():
-    with patch("src.bot.rss_bot.send_alert") as mock:
-        yield mock
+    return Mock()
 
 
 @pytest.fixture
@@ -36,6 +35,7 @@ def test_bot(mock_rss_parser, mock_send_alert):
         interval=10,
         stop_timeout=0.1,
         sleep_interval=0.01,
+        alert_sender=mock_send_alert,
     )
 
 

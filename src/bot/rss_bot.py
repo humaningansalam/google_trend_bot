@@ -1,4 +1,5 @@
 import logging
+import requests
 import schedule
 import time
 from datetime import datetime, timedelta
@@ -6,16 +7,25 @@ from threading import Event, Lock, Thread
 
 from pytz import timezone
 
-from his_mon import send_alert
 from src.common.metrics import metrics
 
 
 class RSSBot:
-    def __init__(self, rss_parser, interval, stop_timeout=5, sleep_interval=10):
+    def __init__(
+        self,
+        rss_parser,
+        interval,
+        stop_timeout=5,
+        sleep_interval=10,
+        webhook_url=None,
+        alert_sender=None,
+    ):
         self.rss_parser = rss_parser
         self.interval = int(interval)
         self.stop_timeout = stop_timeout
         self.sleep_interval = sleep_interval
+        self.webhook_url = webhook_url
+        self.alert_sender = alert_sender or self._send_alert
         self.is_running = False
         self.thread = None
         self._stop_event = Event()
@@ -25,6 +35,16 @@ class RSSBot:
         self._scheduler = schedule.Scheduler()
         self.trend_dict = {}
         self.logger = logging.getLogger("RSSBot")
+
+    def _send_alert(self, message):
+        if not self.webhook_url:
+            raise ValueError("SLACK_WEBHOOK is required to send trend alerts")
+        response = requests.post(
+            self.webhook_url,
+            json={"text": message},
+            timeout=5,
+        )
+        response.raise_for_status()
 
     def _register_jobs(self):
         self._scheduler.clear()
@@ -62,7 +82,7 @@ class RSSBot:
                 for entry in new_entries:
                     message = f"{entry['title']}\n{entry['content']}\n{entry['link']}\n{entry['published']}"
                     try:
-                        send_alert(message)
+                        self.alert_sender(message)
                         with self._trend_lock:
                             self.trend_dict[entry["title"]] = entry["parsed_time"]
                             self._pending_titles.discard(entry["title"])

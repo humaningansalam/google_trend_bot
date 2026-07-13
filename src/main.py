@@ -2,7 +2,7 @@ from flask import Flask, Response, jsonify, request
 from prometheus_client import generate_latest
 from werkzeug.exceptions import HTTPException
 
-from his_mon import ResourceMonitor, init_webhook, setup_logging
+from his_mon import ResourceMonitor, setup_logging
 
 from src.bot.rss_bot import RSSBot
 from src.bot.scraper import Scraper
@@ -110,7 +110,6 @@ def create_app(bot=None, scraper=None):
 
 
 def create_runtime_app():
-    init_webhook(url=Config.SLACK_WEBHOOK)
     setup_logging(
         level=Config.LOG_LEVEL,
         loki_url=Config.LOKI_URL,
@@ -119,7 +118,11 @@ def create_runtime_app():
     )
 
     rss_parser = RSSParser()
-    bot = RSSBot(rss_parser, interval=Config.SCHEDULE_INTERVAL)
+    bot = RSSBot(
+        rss_parser,
+        interval=Config.SCHEDULE_INTERVAL,
+        webhook_url=Config.SLACK_WEBHOOK,
+    )
     scraper = Scraper()
 
     app = create_app(bot=bot, scraper=scraper)
