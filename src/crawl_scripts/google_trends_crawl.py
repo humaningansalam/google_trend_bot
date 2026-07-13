@@ -27,15 +27,14 @@ async def crawl(page: Page, context: BrowserContext, job_path: str):
             items_processed_on_this_page = 0
             for tr_index, tr in enumerate(tr_elements):
                 try:
-                    await tr.click()
-                    await page.wait_for_selector(".EMz5P", timeout=15000)
+                    detail_panel = await _open_detail_panel(page, tr)
                 except Exception as e_click_wait:
                     logging.warning(
                         f"Error clicking or waiting for details on item {tr_index + 1}: {e_click_wait}"
                     )
                     continue
 
-                trend_data = await _extract_trend_data(tr, page)
+                trend_data = await _extract_trend_data(tr, detail_panel)
                 data.append(trend_data)
                 items_processed_on_this_page += 1
                 logging.info(f"Collected item {len(data)}: {trend_data.get('트렌드 제목')}")
@@ -72,7 +71,22 @@ async def crawl(page: Page, context: BrowserContext, job_path: str):
         logging.error(f"Crawl error: {str(e)}", exc_info=True)
         return {'error': str(e)}
 
-async def _extract_trend_data(tr, page):
+async def _open_detail_panel(page, tr):
+    title_elem = await tr.query_selector(".mZ3RIc")
+    if not title_elem:
+        raise ValueError("Trend row is missing a title")
+
+    trend_title = await title_elem.inner_text()
+    await tr.click()
+
+    detail_panel = page.locator(".EMz5P").filter(
+        has=page.get_by_role("heading", name=trend_title, exact=True)
+    )
+    await detail_panel.wait_for(state="visible", timeout=15000)
+    return detail_panel
+
+
+async def _extract_trend_data(tr, detail_panel):
     """트렌드 데이터 추출"""
     title_elem = await tr.query_selector(".mZ3RIc")
     volume_elem = await tr.query_selector(".lqv0Cb")
@@ -81,19 +95,20 @@ async def _extract_trend_data(tr, page):
     search_volume = await volume_elem.inner_text() if volume_elem else "N/A"
 
     # 트렌드 분석 데이터
-    emz5p = await page.query_selector(".EMz5P")
     selector = "span[jsname='V67aGc']:not([aria-hidden='true'])"
-    analysis_elems = await emz5p.query_selector_all(selector)
+    analysis_elems = await detail_panel.locator(selector).all()
     trend_analysis = [await elem.inner_text() for elem in analysis_elems]
 
     # 뉴스 데이터
     news_data = []
-    news_elems = await emz5p.query_selector_all("div[jsaction='click:vx9mmb;contextmenu:rbJKIe']")
+    news_elems = await detail_panel.locator(
+        "div[jsaction='click:vx9mmb;contextmenu:rbJKIe']"
+    ).all()
     for news in news_elems:
-        title_elem = await news.query_selector(".QbLC8c")
-        link_elem = await news.query_selector("a")
-        
-        if title_elem and link_elem:
+        title_elem = news.locator(".QbLC8c")
+        link_elem = news.locator("a")
+
+        if await title_elem.count() and await link_elem.count():
             news_title = await title_elem.inner_text()
             news_url = await link_elem.get_attribute("href")
             news_data.append({"뉴스 제목": news_title, "URL": news_url})
