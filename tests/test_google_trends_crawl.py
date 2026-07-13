@@ -81,3 +81,56 @@ def test_extract_trend_data_uses_the_matched_detail_panel():
         "트렌드 분석": ["Analysis"],
         "뉴스 데이터": [],
     }
+
+
+def test_extract_trend_data_uses_first_news_title_and_link_match():
+    title_element = Mock()
+    title_element.inner_text = AsyncMock(return_value="Target Trend")
+    volume_element = Mock()
+    volume_element.inner_text = AsyncMock(return_value="100K+")
+    row = Mock()
+    row.query_selector = AsyncMock(
+        side_effect=[title_element, volume_element]
+    )
+
+    first_news_title = Mock()
+    first_news_title.count = AsyncMock(return_value=1)
+    first_news_title.inner_text = AsyncMock(return_value="Primary headline")
+    title_matches = Mock()
+    title_matches.first = first_news_title
+    title_matches.count = AsyncMock(return_value=2)
+    title_matches.inner_text = AsyncMock(
+        side_effect=AssertionError("strict multi-match title locator used")
+    )
+
+    first_news_link = Mock()
+    first_news_link.count = AsyncMock(return_value=1)
+    first_news_link.get_attribute = AsyncMock(
+        return_value="https://example.test/primary"
+    )
+    link_matches = Mock()
+    link_matches.first = first_news_link
+    link_matches.count = AsyncMock(return_value=2)
+    link_matches.get_attribute = AsyncMock(
+        side_effect=AssertionError("strict multi-match link locator used")
+    )
+
+    news = Mock()
+    news.locator = Mock(side_effect=[title_matches, link_matches])
+    analysis_locator = Mock()
+    analysis_locator.all = AsyncMock(return_value=[])
+    news_locator = Mock()
+    news_locator.all = AsyncMock(return_value=[news])
+    detail_panel = Mock()
+    detail_panel.locator = Mock(
+        side_effect=[analysis_locator, news_locator]
+    )
+
+    result = asyncio.run(_extract_trend_data(row, detail_panel))
+
+    assert result["뉴스 데이터"] == [
+        {
+            "뉴스 제목": "Primary headline",
+            "URL": "https://example.test/primary",
+        }
+    ]

@@ -105,8 +105,8 @@ async def _extract_trend_data(tr, detail_panel):
         "div[jsaction='click:vx9mmb;contextmenu:rbJKIe']"
     ).all()
     for news in news_elems:
-        title_elem = news.locator(".QbLC8c")
-        link_elem = news.locator("a")
+        title_elem = news.locator(".QbLC8c").first
+        link_elem = news.locator("a").first
 
         if await title_elem.count() and await link_elem.count():
             news_title = await title_elem.inner_text()
