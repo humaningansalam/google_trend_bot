@@ -169,9 +169,14 @@ def test_get_trends(client, test_scraper):
 
 def test_get_trends_returns_error_payload(client):
     client.application.scraper.scrape_trends = Mock(return_value={"status": "error", "message": "boom"})
-    response = client.get("/trends")
+    with patch.object(client.application.logger, "warning") as log_warning:
+        response = client.get("/trends")
+
     assert response.status_code == 502
     assert response.get_json() == {"status": "error", "message": "boom"}
+    log_warning.assert_called_once_with(
+        "Trend scraper reported failure: %s", "boom"
+    )
 
 
 def test_get_trends_returns_json_on_exception(client):
@@ -179,27 +184,42 @@ def test_get_trends_returns_json_on_exception(client):
         raise RuntimeError("boom")
 
     client.application.scraper.scrape_trends = boom
-    response = client.get("/trends")
+    with patch.object(client.application.logger, "exception") as log_exception:
+        response = client.get("/trends")
+
     assert response.status_code == 502
     assert response.get_json() == {"status": "error", "message": "Failed to fetch trends"}
+    log_exception.assert_called_once_with("Trend scraping failed")
 
 
 @pytest.mark.parametrize("result", [None, [], "oops"])
 def test_get_trends_returns_json_on_malformed_result(client, result):
     client.application.scraper.scrape_trends = Mock(return_value=result)
-    response = client.get("/trends")
+    with patch.object(client.application.logger, "error") as log_error:
+        response = client.get("/trends")
+
     assert response.status_code == 502
     assert response.get_json() == {"status": "error", "message": "Failed to fetch trends"}
+    log_error.assert_called_once_with(
+        "Trend scraper returned invalid result type: %s",
+        type(result).__name__,
+    )
 
 
 @pytest.mark.parametrize("result", [{"status": "error"}, {"status": "success"}])
 def test_get_trends_rejects_incomplete_status_payloads(client, result):
     client.application.scraper.scrape_trends = Mock(return_value=result)
 
-    response = client.get("/trends")
+    with patch.object(client.application.logger, "error") as log_error:
+        response = client.get("/trends")
 
     assert response.status_code == 502
     assert response.get_json() == {"status": "error", "message": "Failed to fetch trends"}
+    log_error.assert_called_once_with(
+        "Trend scraper returned malformed payload: status=%r keys=%s",
+        result.get("status"),
+        sorted(result),
+    )
 
 
 @pytest.mark.parametrize("path", ["/start", "/missing"])

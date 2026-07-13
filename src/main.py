@@ -76,13 +76,26 @@ def create_app(bot=None, scraper=None):
             if hasattr(result, "__await__"):
                 result = await result
         except Exception:
+            app.logger.exception("Trend scraping failed")
             return jsonify({"status": "error", "message": "Failed to fetch trends"}), 502
         if not isinstance(result, dict):
+            app.logger.error(
+                "Trend scraper returned invalid result type: %s",
+                type(result).__name__,
+            )
             return jsonify({"status": "error", "message": "Failed to fetch trends"}), 502
         if result.get("status") == "success" and "data" in result:
             return jsonify({"status": "success", "data": result["data"]}), 200
         if result.get("status") == "error" and isinstance(result.get("message"), str):
+            app.logger.warning(
+                "Trend scraper reported failure: %s", result["message"]
+            )
             return jsonify({"status": "error", "message": result["message"]}), 502
+        app.logger.error(
+            "Trend scraper returned malformed payload: status=%r keys=%s",
+            result.get("status"),
+            sorted(str(key) for key in result),
+        )
         return jsonify({"status": "error", "message": "Failed to fetch trends"}), 502
 
     @app.route("/metrics")
