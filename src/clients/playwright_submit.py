@@ -209,6 +209,18 @@ def get_job_results(job_id: str) -> Optional[Dict[str, Any]]:
         logging.error(f"An unexpected error occurred while fetching results: {e}")
         return None
 
+
+def _resolve_child_path(base_dir: Path, child: str) -> Optional[Path]:
+    try:
+        resolved_path = (base_dir / child).resolve()
+    except (OSError, RuntimeError, TypeError):
+        return None
+
+    if resolved_path == base_dir or not resolved_path.is_relative_to(base_dir):
+        return None
+    return resolved_path
+
+
 def download_files(job_id: str, files_dict: Dict[str, str]):
     """
     결과 파일을 지정된 URL에서 다운로드합니다.
@@ -217,7 +229,12 @@ def download_files(job_id: str, files_dict: Dict[str, str]):
         job_id: 파일을 저장할 하위 폴더 이름으로 사용될 작업 ID.
         files_dict: 파일 이름과 다운로드 URL 경로 맵.
     """
-    download_dir = Path('downloads') / job_id
+    download_root = Path('downloads').resolve()
+    download_dir = _resolve_child_path(download_root, job_id)
+    if download_dir is None:
+        logging.error(f"Refusing unsafe download job ID: {job_id}")
+        return
+
     try:
         download_dir.mkdir(parents=True, exist_ok=True)
         logging.info(f"Downloading files to: {download_dir.resolve()}")
@@ -229,7 +246,10 @@ def download_files(job_id: str, files_dict: Dict[str, str]):
         # 서버 응답의 URL 경로가 예상대로 오는지 확인
         if isinstance(file_url_path, str) and file_url_path.startswith('/api/jobs/download/'):
             download_url = f'{SERVER_URL}{file_url_path}'
-            file_path = download_dir / filename
+            file_path = _resolve_child_path(download_dir, filename)
+            if file_path is None:
+                logging.error(f"Refusing unsafe result filename: {filename}")
+                continue
             try:
                 logging.info(f"Downloading {filename} from {download_url}...")
                 # stream=True 로 대용량 파일 처리 개선
