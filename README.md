@@ -17,14 +17,14 @@ On Linux hosts that do not already have Chromium system libraries, run `uv run p
 ## Environment variables
 
 - `SLACK_WEBHOOK`: Slack incoming webhook URL.
-- `VERSION`: Container image tag used by Compose, default `0.3.3` in `.env.example`.
+- `VERSION`: Container image tag used by Compose, default `0.3.4` in `.env.example`.
 - `LOKI_URL`: Optional Loki push endpoint used by logging. Leave it empty to disable Loki output.
 - `SCHEDULE_INTERVAL`: RSS polling interval in minutes. Must be a positive integer.
 - `CONTROL_TOKEN`: Optional bearer token for `/start`, `/stop`, and `/reset`. When unset, those endpoints keep their current local behavior.
 - `LOG_LEVEL`: Python log level, default `INFO`.
 - `APP_NAME`: App tag written into logs, default `google-trend-bot`.
 - `APP_ENV`: Environment tag written into logs, default `dev`.
-- `USE_SERVER`: Set to `True` to run scraper jobs through the server submit path.
+- `USE_SERVER`: `False` selects the local browser and `True` selects the remote Playwright job server. Other values are rejected at startup.
 - `PLAYWRIGHT_URL`: Browser automation base URL used by scraping support code.
 
 ## Tests
@@ -51,8 +51,10 @@ On Linux hosts that do not already have Chromium system libraries, run `uv run p
 ## Endpoints
 
 - `GET /health` returns `Healthy`.
-- `POST /start` starts the RSS bot.
-- `POST /stop` stops the RSS bot.
-- `POST /reset` clears old trend memory.
-- `GET /trends` returns `{"status":"success","data":...}` on success or `{"status":"error","message":...}` on failure.
+- `POST /start` returns `{"status":"success","state":"running"}` after starting the RSS bot.
+- `POST /stop` returns a success response with `state` set to `stopped` or `stopping`.
+- `POST /reset` clears old trend memory and returns `{"status":"success"}`.
+- `GET /trends` returns `{"status":"success","data":...}` on success. Errors use `{"status":"error","code":"...","message":"..."}` with a stable machine-readable code.
 - `GET /metrics` exposes Prometheus metrics.
+
+All JSON error responses include a stable `code`; clients should branch on that code rather than matching the human-readable `message`.
