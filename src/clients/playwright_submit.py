@@ -1,272 +1,336 @@
-#common/clients/playwright_submit.py
+import logging
+import os
+import time
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path, PurePosixPath
+from typing import Generic, Mapping, TypeVar
+from urllib.parse import urlsplit
 
 import requests
-import time
-import os
-import json
-from pathlib import Path
-import logging
-from typing import List, Dict, Any, Optional
-
-# 서버 URL 설정 
-SERVER_URL = os.getenv('PLAYWRIGHT_URL', 'http://localhost:3000')
-POLL_INTERVAL_SECONDS = 10 # 상태 확인 간격 
-MAX_POLL_ATTEMPTS = 60 # 최대 상태 확인 횟수 
-
-def submit_job(script_path: str, job_name: str, additional_files_info: Optional[List[Dict[str, str]]] = None) -> Optional[str]:
-    """
-    서버에 작업을 제출하고 job_id를 반환합니다.
-
-    Args:
-        script_path: 실행할 크롤링 스크립트 파일 경로.
-        job_name: 작업의 고유 이름.
-        additional_files_info: 추가 파일 정보 리스트. 각 요소는 {'path': '파일경로', 'name': '서버에저장될이름'} 형태의 딕셔너리.
-
-    Returns:
-        제출 성공 시 job_id 문자열, 실패 시 None.
-    """
-    if not os.path.exists(script_path):
-        logging.error(f"Error: Script file not found at {script_path}")
-        return None
-
-    submit_url = f"{SERVER_URL}/api/jobs/submit"
-    files_to_upload = []
-    opened_files = [] 
-
-    try:
-        # 스크립트 파일 추가
-        script_file_obj = open(script_path, "rb")
-        opened_files.append(script_file_obj)
-        files_to_upload.append(
-            ("script_file", (os.path.basename(script_path), script_file_obj, "text/x-python"))
-        )
-        logging.info(f"Preparing script file: {script_path}")
-
-        # 추가 파일 처리
-        if additional_files_info:
-            for file_info in additional_files_info:
-                path = file_info.get('path')
-                name = file_info.get('name')
-                if not path or not name:
-                    logging.warning(f"Invalid additional file info skipped: {file_info}")
-                    continue
-
-                if os.path.exists(path):
-                    try:
-                        add_file_obj = open(path, "rb")
-                        opened_files.append(add_file_obj)
-                        files_to_upload.append(
-                            ("additional_files", (name, add_file_obj, "application/octet-stream"))
-                        )
-                        logging.info(f"Preparing additional file: {name} from {path}")
-                    except Exception as e:
-                        logging.error(f"Error opening additional file {path}: {e}")
-                        return None
-                else:
-                    logging.warning(f"Additional file not found at {path}, skipping.")
-
-        # 요청 데이터
-        data = {"jobname": job_name}
-
-        logging.info(f"Submitting job '{job_name}' to {submit_url}...")
-        response = requests.post(submit_url, files=files_to_upload, data=data, timeout=30)
-        response.raise_for_status()
-
-        result = response.json()
-        if response.status_code == 202 and 'job_id' in result:
-            job_id = result['job_id']
-            logging.info(f"Job submitted successfully. Job ID: {job_id}, Status: {result.get('status', 'N/A')}")
-            return job_id
-        else:
-            logging.error(f"Unexpected response from server: {response.status_code} - {response.text}")
-            return None
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error submitting job: {e}")
-        if hasattr(e, 'response') and e.response is not None:
-            logging.error(f"Server response: {e.response.status_code} - {e.response.text}")
-        return None
-    except Exception as e:
-        logging.error(f"An unexpected error occurred during job submission: {e}")
-        return None
-    finally:
-        # 열린 파일 핸들 모두 닫기
-        for f in opened_files:
-            try:
-                f.close()
-            except Exception as e:
-                logging.warning(f"Error closing file handle: {e}")
 
 
-def poll_job_status(job_id: str) -> Optional[str]:
-    """
-    작업 상태를 폴링하고 최종 상태 ('COMPLETED', 'FAILED', 'TIMEOUT', None)를 반환합니다.
+T = TypeVar("T")
 
-    Args:
-        job_id: 확인할 작업 ID.
 
-    Returns:
-        최종 상태 문자열 또는 None (Job ID 못 찾음).
-    """
-    status_url = f"{SERVER_URL}/api/jobs/status/{job_id}"
-    logging.info(f"Polling job status for {job_id} at {status_url}...")
+def _request_failure_message(
+    operation: str, error: requests.RequestException
+) -> str:
+    if error.response is not None:
+        return f"{operation} failed with HTTP {error.response.status_code}"
+    return f"{operation} request failed"
 
-    for attempt in range(MAX_POLL_ATTEMPTS):
+
+class RemoteJobState(str, Enum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class RemoteJobErrorCode(str, Enum):
+    SCRIPT_NOT_FOUND = "script_not_found"
+    SUBMISSION_FAILED = "submission_failed"
+    INVALID_RESPONSE = "invalid_response"
+    JOB_NOT_FOUND = "job_not_found"
+    JOB_FAILED = "job_failed"
+    JOB_TIMEOUT = "job_timeout"
+    RESULT_NOT_READY = "result_not_ready"
+    REMOTE_UNAVAILABLE = "remote_unavailable"
+    DOWNLOAD_FAILED = "download_failed"
+
+
+@dataclass(frozen=True)
+class RemoteJobError:
+    code: RemoteJobErrorCode
+    message: str
+
+
+@dataclass(frozen=True)
+class RemoteJobResult(Generic[T]):
+    value: T | None = None
+    error: RemoteJobError | None = None
+
+    def __post_init__(self):
+        if (self.value is None) == (self.error is None):
+            raise ValueError("RemoteJobResult requires exactly one of value or error")
+
+    @property
+    def is_success(self) -> bool:
+        return self.error is None
+
+    @classmethod
+    def success(cls, value: T):
+        return cls(value=value)
+
+    @classmethod
+    def failure(cls, code: RemoteJobErrorCode, message: str):
+        return cls(error=RemoteJobError(code=code, message=message))
+
+
+@dataclass(frozen=True)
+class JobResultEnvelope:
+    payload: object
+    files: dict[str, str]
+
+
+class PlaywrightJobClient:
+    def __init__(
+        self,
+        server_url: str | None = None,
+        poll_interval: float = 10,
+        max_poll_attempts: int = 60,
+        sleep=time.sleep,
+    ):
+        self.server_url = (
+            server_url or os.getenv("PLAYWRIGHT_URL", "http://localhost:3000")
+        ).rstrip("/")
+        self.poll_interval = poll_interval
+        self.max_poll_attempts = max_poll_attempts
+        self.sleep = sleep
+
+    def execute(
+        self, script_path: str, job_name: str
+    ) -> RemoteJobResult[JobResultEnvelope]:
+        submission = self._submit(script_path, job_name)
+        if not submission.is_success:
+            return RemoteJobResult(error=submission.error)
+
+        job_id = submission.value
+        poll_result = self._poll(job_id)
+        if not poll_result.is_success:
+            return RemoteJobResult(error=poll_result.error)
+
+        if poll_result.value is RemoteJobState.FAILED:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.JOB_FAILED,
+                "Remote Playwright job failed",
+            )
+
+        result = self._get_results(job_id)
+        if not result.is_success:
+            return RemoteJobResult(error=result.error)
+        return result
+
+    def _submit(self, script_path: str, job_name: str) -> RemoteJobResult[str]:
+        if not os.path.isfile(script_path):
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.SCRIPT_NOT_FOUND,
+                f"Crawl script does not exist: {script_path}",
+            )
+
         try:
-            response = requests.get(status_url, timeout=10)
-            if response.status_code == 404:
-                 logging.error(f"Error: Job ID {job_id} not found on server.")
-                 return None 
+            with open(script_path, "rb") as script_file:
+                response = requests.post(
+                    f"{self.server_url}/api/jobs/submit",
+                    files={
+                        "script_file": (
+                            os.path.basename(script_path),
+                            script_file,
+                            "text/x-python",
+                        )
+                    },
+                    data={"jobname": job_name},
+                    timeout=30,
+                )
             response.raise_for_status()
+        except requests.RequestException as exc:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.SUBMISSION_FAILED,
+                _request_failure_message("Remote job submission", exc),
+            )
+        except OSError:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.SUBMISSION_FAILED,
+                "Remote crawl script could not be read",
+            )
+        try:
+            payload = response.json()
+        except ValueError:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.INVALID_RESPONSE,
+                "Remote submit response is not valid JSON",
+            )
 
-            status_data = response.json()
-            current_status = status_data.get('status')
-            logging.info(f"Attempt {attempt + 1}/{MAX_POLL_ATTEMPTS}: Job status = {current_status}")
+        job_id = payload.get("job_id") if isinstance(payload, Mapping) else None
+        if response.status_code != 202 or not isinstance(job_id, str) or not job_id:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.INVALID_RESPONSE,
+                "Remote submit response must be HTTP 202 with a job_id",
+            )
+        return RemoteJobResult.success(job_id)
 
-            if current_status in ['COMPLETED', 'FAILED']:
-                logging.info(f"Job {job_id} reached final status: {current_status}")
-                return current_status # 최종 상태 도달
-            elif current_status in ['PENDING', 'RUNNING']:
-                # 아직 진행 중이면 잠시 대기 후 다시 시도
-                time.sleep(POLL_INTERVAL_SECONDS)
-            else:
-                 logging.warning(f"Unknown job status received: {current_status}. Continuing poll.")
-                 time.sleep(POLL_INTERVAL_SECONDS)
+    def _poll(self, job_id: str) -> RemoteJobResult[RemoteJobState]:
+        status_url = f"{self.server_url}/api/jobs/status/{job_id}"
+        for attempt in range(self.max_poll_attempts):
+            try:
+                response = requests.get(status_url, timeout=10)
+                if response.status_code == 404:
+                    return RemoteJobResult.failure(
+                        RemoteJobErrorCode.JOB_NOT_FOUND,
+                        f"Remote job was not found: {job_id}",
+                    )
+                response.raise_for_status()
+            except requests.RequestException as exc:
+                if attempt + 1 == self.max_poll_attempts:
+                    return RemoteJobResult.failure(
+                        RemoteJobErrorCode.REMOTE_UNAVAILABLE,
+                        _request_failure_message("Remote job status", exc),
+                    )
+                self.sleep(self.poll_interval)
+                continue
+            try:
+                payload = response.json()
+            except ValueError:
+                return RemoteJobResult.failure(
+                    RemoteJobErrorCode.INVALID_RESPONSE,
+                    "Remote status response is not valid JSON",
+                )
 
-        except requests.exceptions.Timeout:
-            logging.warning(f"Polling request timed out for job {job_id}. Retrying...")
-            time.sleep(POLL_INTERVAL_SECONDS)
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error polling status for job {job_id}: {e}. Retrying after delay...")
-            # 네트워크 오류 등 발생 시 잠시 후 재시도
-            time.sleep(POLL_INTERVAL_SECONDS * 2)
-        except Exception as e:
-            logging.error(f"An unexpected error occurred during status polling: {e}")
-            time.sleep(POLL_INTERVAL_SECONDS * 2)
+            raw_state = payload.get("status") if isinstance(payload, Mapping) else None
+            try:
+                state = RemoteJobState(raw_state)
+            except (TypeError, ValueError):
+                return RemoteJobResult.failure(
+                    RemoteJobErrorCode.INVALID_RESPONSE,
+                    "Remote status response contains an unknown job state",
+                )
+
+            if state in {RemoteJobState.COMPLETED, RemoteJobState.FAILED}:
+                return RemoteJobResult.success(state)
+            self.sleep(self.poll_interval)
+
+        return RemoteJobResult.failure(
+            RemoteJobErrorCode.JOB_TIMEOUT,
+            f"Remote job did not finish after {self.max_poll_attempts} polls",
+        )
+
+    def _get_results(self, job_id: str) -> RemoteJobResult[JobResultEnvelope]:
+        try:
+            response = requests.get(
+                f"{self.server_url}/api/jobs/results/{job_id}", timeout=30
+            )
+            if response.status_code == 404:
+                return RemoteJobResult.failure(
+                    RemoteJobErrorCode.JOB_NOT_FOUND,
+                    f"Remote job result was not found: {job_id}",
+                )
+            if response.status_code == 202:
+                return RemoteJobResult.failure(
+                    RemoteJobErrorCode.RESULT_NOT_READY,
+                    f"Remote job result is not ready: {job_id}",
+                )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.REMOTE_UNAVAILABLE,
+                _request_failure_message("Remote job result", exc),
+            )
+        try:
+            payload = response.json()
+        except ValueError:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.INVALID_RESPONSE,
+                "Remote result response is not valid JSON",
+            )
+
+        if not isinstance(payload, Mapping) or "result" not in payload:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.INVALID_RESPONSE,
+                "Remote result response must contain a result field",
+            )
+        if payload["result"] is None:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.INVALID_RESPONSE,
+                "Remote result field must not be null",
+            )
+
+        files = payload.get("files", {})
+        if not isinstance(files, Mapping) or not all(
+            isinstance(name, str) and isinstance(url, str)
+            for name, url in files.items()
+        ):
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.INVALID_RESPONSE,
+                "Remote result files must be a string map",
+            )
+        return RemoteJobResult.success(
+            JobResultEnvelope(payload=payload["result"], files=dict(files))
+        )
+
+    def download_files(
+        self, job_id: str, files: Mapping[str, str]
+    ) -> RemoteJobResult[list[Path]]:
+        download_root = Path("downloads").resolve()
+        download_dir = _resolve_child_path(download_root, job_id)
+        if download_dir is None:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.DOWNLOAD_FAILED,
+                "Remote job ID resolves outside the download directory",
+            )
+
+        try:
+            download_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.DOWNLOAD_FAILED,
+                "Download directory could not be created",
+            )
+
+        saved_files = []
+        for filename, file_url in files.items():
+            file_path = _resolve_child_path(download_dir, filename)
+            if file_path is None:
+                return RemoteJobResult.failure(
+                    RemoteJobErrorCode.DOWNLOAD_FAILED,
+                    "Remote filename resolves outside the job directory",
+                )
+            if not _is_download_path(file_url):
+                return RemoteJobResult.failure(
+                    RemoteJobErrorCode.INVALID_RESPONSE,
+                    "Remote file URL does not match the download endpoint schema",
+                )
+
+            try:
+                response = requests.get(
+                    f"{self.server_url}{file_url}", stream=True, timeout=60
+                )
+                response.raise_for_status()
+                with open(file_path, "wb") as output:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        output.write(chunk)
+            except requests.RequestException as exc:
+                message = _request_failure_message(
+                    "Remote file download", exc
+                )
+                logging.error("%s", message)
+                return RemoteJobResult.failure(
+                    RemoteJobErrorCode.DOWNLOAD_FAILED,
+                    message,
+                )
+            except OSError:
+                logging.error("Remote file could not be saved", exc_info=True)
+                return RemoteJobResult.failure(
+                    RemoteJobErrorCode.DOWNLOAD_FAILED,
+                    "Remote file could not be saved",
+                )
+            saved_files.append(file_path)
+        return RemoteJobResult.success(saved_files)
 
 
-    logging.warning(f"Polling timed out for job {job_id} after {MAX_POLL_ATTEMPTS} attempts.")
-    return "TIMEOUT" # 폴링 시간 초과
-
-
-def get_job_results(job_id: str) -> Optional[Dict[str, Any]]:
-    """
-    작업 결과를 서버에서 가져옵니다.
-
-    Args:
-        job_id: 결과를 가져올 작업 ID.
-
-    Returns:
-        서버에서 받은 결과 딕셔너리 또는 None (실패 시).
-    """
-    results_url = f"{SERVER_URL}/api/jobs/results/{job_id}"
-    logging.info(f"Fetching results for job {job_id} from {results_url}...")
-    try:
-        response = requests.get(results_url, timeout=30)
-        if response.status_code == 404:
-            logging.error(f"Error: Job ID {job_id} not found when fetching results.")
-            return None
-        if response.status_code == 202:
-             logging.warning(f"Job {job_id} is still processing according to results endpoint.")
-             return response.json() 
-
-        response.raise_for_status() 
-
-        results_data = response.json()
-        logging.info(f"Successfully fetched results for job {job_id}.")
-
-        # 결과 출력 
-        print("\n" + "=" * 20 + f" Results for Job {job_id} " + "=" * 20)
-        print(f"Status: {results_data.get('status')}")
-        print(f"Job Name: {results_data.get('jobname')}")
-        print(f"Submitted At: {results_data.get('submitted_at')}")
-        print(f"Duration: {results_data.get('duration_seconds'):.2f} seconds" if results_data.get('duration_seconds') is not None else "N/A")
-        print("-" * 20 + " Crawl Result/Error " + "-" * 19)
-        print(json.dumps(results_data.get('result'), indent=2, ensure_ascii=False))
-        print("-" * 60)
-
-        # 파일 정보 출력 및 다운로드 트리거
-        if 'files' in results_data and results_data['files'] and 'error' not in results_data['files']:
-            logging.info("Result files available:")
-            for filename, download_url_path in results_data['files'].items():
-                logging.info(f"- {filename}: {SERVER_URL}{download_url_path}")
-            # 파일 다운로드 실행
-            download_files(job_id, results_data['files'])
-        elif 'files' in results_data and 'error' in results_data['files']:
-             logging.error(f"Server reported an error listing files: {results_data['files']['error']}")
-        else:
-             logging.info("No result files found or reported.")
-
-        print("=" * 60 + "\n")
-        return results_data
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching results for job {job_id}: {e}")
-        if hasattr(e, 'response') and e.response is not None:
-            logging.error(f"Server response: {e.response.status_code} - {e.response.text}")
-        return None
-    except Exception as e:
-        logging.error(f"An unexpected error occurred while fetching results: {e}")
-        return None
-
-
-def _resolve_child_path(base_dir: Path, child: str) -> Optional[Path]:
+def _resolve_child_path(base_dir: Path, child: str) -> Path | None:
     try:
         resolved_path = (base_dir / child).resolve()
     except (OSError, RuntimeError, TypeError):
         return None
-
     if resolved_path == base_dir or not resolved_path.is_relative_to(base_dir):
         return None
     return resolved_path
 
 
-def download_files(job_id: str, files_dict: Dict[str, str]):
-    """
-    결과 파일을 지정된 URL에서 다운로드합니다.
-
-    Args:
-        job_id: 파일을 저장할 하위 폴더 이름으로 사용될 작업 ID.
-        files_dict: 파일 이름과 다운로드 URL 경로 맵.
-    """
-    download_root = Path('downloads').resolve()
-    download_dir = _resolve_child_path(download_root, job_id)
-    if download_dir is None:
-        logging.error(f"Refusing unsafe download job ID: {job_id}")
-        return
-
-    try:
-        download_dir.mkdir(parents=True, exist_ok=True)
-        logging.info(f"Downloading files to: {download_dir.resolve()}")
-    except OSError as e:
-         logging.error(f"Failed to create download directory {download_dir}: {e}")
-         return
-
-    for filename, file_url_path in files_dict.items():
-        # 서버 응답의 URL 경로가 예상대로 오는지 확인
-        if isinstance(file_url_path, str) and file_url_path.startswith('/api/jobs/download/'):
-            download_url = f'{SERVER_URL}{file_url_path}'
-            file_path = _resolve_child_path(download_dir, filename)
-            if file_path is None:
-                logging.error(f"Refusing unsafe result filename: {filename}")
-                continue
-            try:
-                logging.info(f"Downloading {filename} from {download_url}...")
-                # stream=True 로 대용량 파일 처리 개선
-                file_response = requests.get(download_url, stream=True, timeout=60) # 다운로드 타임아웃
-                file_response.raise_for_status() # HTTP 에러 확인
-
-                with open(file_path, 'wb') as f:
-                    # chunk 단위로 파일 쓰기
-                    for chunk in file_response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                logging.info(f"Successfully downloaded and saved: {filename}")
-
-            except requests.exceptions.RequestException as e:
-                logging.error(f"Failed to download {filename}: {e}")
-            except IOError as e:
-                 logging.error(f"Failed to save file {filename} to {file_path}: {e}")
-            except Exception as e:
-                 logging.error(f"An unexpected error occurred during download of {filename}: {e}")
-        else:
-             logging.warning(f"Invalid or unexpected file URL path for {filename}: {file_url_path}")
+def _is_download_path(value: str) -> bool:
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+        return False
+    parts = PurePosixPath(parsed.path).parts
+    return len(parts) >= 5 and parts[:4] == ("/", "api", "jobs", "download")

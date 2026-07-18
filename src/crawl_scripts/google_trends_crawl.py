@@ -2,7 +2,6 @@
 
 from playwright.async_api import Page, BrowserContext
 import logging
-import os
 
 async def crawl(page: Page, context: BrowserContext, job_path: str):
     """구글 트렌드 크롤링 함수 """
@@ -19,24 +18,25 @@ async def crawl(page: Page, context: BrowserContext, job_path: str):
 
         # 크롤링 실행
         data = []
+        rows_discovered = 0
         max_pages = 5
         current_page = 1
         while current_page <= max_pages:
             tr_elements = await page.query_selector_all("tbody[jsname='cC57zf'] tr[jsname='oKdM2c']")
+            rows_discovered += len(tr_elements)
 
-            items_processed_on_this_page = 0
             for tr_index, tr in enumerate(tr_elements):
                 try:
                     detail_panel = await _open_detail_panel(page, tr)
-                except Exception as e_click_wait:
+                    trend_data = await _extract_trend_data(tr, detail_panel)
+                except Exception as row_error:
                     logging.warning(
-                        f"Error clicking or waiting for details on item {tr_index + 1}: {e_click_wait}"
+                        "Error extracting trend item "
+                        f"{tr_index + 1}: {row_error}"
                     )
                     continue
 
-                trend_data = await _extract_trend_data(tr, detail_panel)
                 data.append(trend_data)
-                items_processed_on_this_page += 1
                 logging.info(f"Collected item {len(data)}: {trend_data.get('트렌드 제목')}")
 
             # 다음 페이지로 넘어갈지 결정
@@ -60,16 +60,26 @@ async def crawl(page: Page, context: BrowserContext, job_path: str):
             await page.wait_for_timeout(2000)
             current_page += 1
 
+        if rows_discovered and not data:
+            message = (
+                "Failed to extract any of "
+                f"{rows_discovered} discovered trend rows"
+            )
+            logging.error(message)
+            return {
+                "status": "error",
+                "error": {"code": "crawl_failed", "message": message},
+            }
+
         logging.info(f"Finished crawling. Collected {len(data)} items.")
-        return {
-            'status': 'success',
-            'data': data,
-            'screenshot': 'trend_screenshot.png'
-        }
+        return {"status": "success", "data": data}
 
     except Exception as e:
         logging.error(f"Crawl error: {str(e)}", exc_info=True)
-        return {'error': str(e)}
+        return {
+            "status": "error",
+            "error": {"code": "crawl_failed", "message": str(e)},
+        }
 
 async def _open_detail_panel(page, tr):
     title_elem = await tr.query_selector(".mZ3RIc")

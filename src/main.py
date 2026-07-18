@@ -6,8 +6,16 @@ from his_mon import ResourceMonitor, setup_logging
 
 from src.bot.rss_bot import RSSBot
 from src.bot.scraper import Scraper
+from src.common.api_contracts import (
+    ApiErrorCode,
+    BotState,
+    error_response,
+    scrape_error_response,
+    success_response,
+)
 from src.common.metrics import metrics
 from src.common.rss_parser import RSSParser
+from src.common.scrape_contracts import ScrapeResult
 from src.config import Config
 
 
@@ -18,12 +26,22 @@ def create_app(bot=None, scraper=None):
 
     @app.errorhandler(HTTPException)
     def handle_http_error(error):
-        return jsonify({"status": "error", "message": error.description}), error.code
+        error_codes = {
+            404: ApiErrorCode.NOT_FOUND,
+            405: ApiErrorCode.METHOD_NOT_ALLOWED,
+        }
+        return error_response(
+            error_codes.get(error.code, ApiErrorCode.HTTP_ERROR),
+            error.description,
+            error.code,
+        )
 
     @app.errorhandler(Exception)
     def handle_unexpected_error(error):
         app.logger.exception("Unhandled request error", exc_info=error)
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
+        return error_response(
+            ApiErrorCode.INTERNAL_ERROR, "Internal server error", 500
+        )
 
     def authorize_control_request():
         control_token = Config.CONTROL_TOKEN
@@ -31,7 +49,9 @@ def create_app(bot=None, scraper=None):
             return None
         auth_header = request.headers.get("Authorization", "")
         if auth_header != f"Bearer {control_token}":
-            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+            return error_response(
+                ApiErrorCode.UNAUTHORIZED, "Unauthorized", 401
+            )
         return None
 
     @app.route("/start", methods=["POST"])
@@ -40,10 +60,16 @@ def create_app(bot=None, scraper=None):
         if unauthorized:
             return unauthorized
         if not app.bot:
-            return jsonify({"status": "error", "message": "Bot not initialized"}), 400
+            return error_response(
+                ApiErrorCode.BOT_NOT_INITIALIZED, "Bot not initialized", 400
+            )
         if app.bot.start():
-            return jsonify({"status": "Bot started"}), 200
-        return jsonify({"status": "error", "message": "Bot is already running"}), 400
+            return success_response(state=BotState.RUNNING.value)
+        return error_response(
+            ApiErrorCode.BOT_ALREADY_RUNNING,
+            "Bot is already running",
+            400,
+        )
 
     @app.route("/stop", methods=["POST"])
     def stop_bot():
@@ -51,11 +77,13 @@ def create_app(bot=None, scraper=None):
         if unauthorized:
             return unauthorized
         if not app.bot:
-            return jsonify({"status": "error", "message": "Bot not initialized"}), 400
+            return error_response(
+                ApiErrorCode.BOT_NOT_INITIALIZED, "Bot not initialized", 400
+            )
         stopped = app.bot.stop()
         if stopped:
-            return jsonify({"status": "Bot stopped", "state": "stopped"}), 200
-        return jsonify({"status": "Bot stop timed out", "state": "stopping"}), 200
+            return success_response(state=BotState.STOPPED.value)
+        return success_response(state=BotState.STOPPING.value)
 
     @app.route("/reset", methods=["POST"])
     def reset_trend():
@@ -63,40 +91,45 @@ def create_app(bot=None, scraper=None):
         if unauthorized:
             return unauthorized
         if not app.bot:
-            return jsonify({"status": "error", "message": "Bot not initialized"}), 400
+            return error_response(
+                ApiErrorCode.BOT_NOT_INITIALIZED, "Bot not initialized", 400
+            )
         app.bot.reset_trend()
-        return jsonify({"status": "Trend reset completed"}), 200
+        return success_response()
 
     @app.route("/trends", methods=["GET"])
     async def get_trends():
         if not app.scraper:
-            return jsonify({"status": "error", "message": "Scraper not initialized"}), 400
+            return error_response(
+                ApiErrorCode.SCRAPER_NOT_INITIALIZED,
+                "Scraper not initialized",
+                400,
+            )
         try:
-            result = app.scraper.scrape_trends()
-            if hasattr(result, "__await__"):
-                result = await result
+            result = await app.scraper.scrape_trends()
         except Exception:
             app.logger.exception("Trend scraping failed")
-            return jsonify({"status": "error", "message": "Failed to fetch trends"}), 502
-        if not isinstance(result, dict):
+            return scrape_error_response(
+                ApiErrorCode.SCRAPER_CONTRACT_VIOLATION,
+                "Failed to fetch trends",
+            )
+        if not isinstance(result, ScrapeResult):
             app.logger.error(
-                "Trend scraper returned invalid result type: %s",
+                "Trend scraper violated its result contract: %s",
                 type(result).__name__,
             )
-            return jsonify({"status": "error", "message": "Failed to fetch trends"}), 502
-        if result.get("status") == "success" and "data" in result:
-            return jsonify({"status": "success", "data": result["data"]}), 200
-        if result.get("status") == "error" and isinstance(result.get("message"), str):
-            app.logger.warning(
-                "Trend scraper reported failure: %s", result["message"]
+            return scrape_error_response(
+                ApiErrorCode.SCRAPER_CONTRACT_VIOLATION,
+                "Failed to fetch trends",
             )
-            return jsonify({"status": "error", "message": result["message"]}), 502
-        app.logger.error(
-            "Trend scraper returned malformed payload: status=%r keys=%s",
-            result.get("status"),
-            sorted(str(key) for key in result),
+        if result.is_success:
+            return success_response(data=result.data)
+        app.logger.warning(
+            "Trend scraper failed: code=%s message=%s",
+            result.error.code.value,
+            result.error.message,
         )
-        return jsonify({"status": "error", "message": "Failed to fetch trends"}), 502
+        return scrape_error_response(result.error.code, result.error.message)
 
     @app.route("/metrics")
     def metrics_endpoint():
@@ -123,7 +156,7 @@ def create_runtime_app():
         interval=Config.SCHEDULE_INTERVAL,
         webhook_url=Config.SLACK_WEBHOOK,
     )
-    scraper = Scraper()
+    scraper = Scraper(backend=Config.SCRAPER_BACKEND)
 
     app = create_app(bot=bot, scraper=scraper)
 

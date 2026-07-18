@@ -1,5 +1,6 @@
+import logging
 from datetime import datetime, timedelta
-from threading import Barrier, Event, Thread
+from threading import Event, Thread
 from time import sleep
 from unittest.mock import Mock, patch
 
@@ -94,8 +95,7 @@ def test_bot_job_retries_on_send_failure_then_marks_trend_on_success(test_bot, m
 
 
 def test_bot_retries_when_slack_returns_http_error(mock_rss_parser, monkeypatch):
-    response = Mock()
-    response.raise_for_status.side_effect = requests.HTTPError("Slack returned 500")
+    response = Mock(status_code=500)
     post = Mock(return_value=response)
     monkeypatch.setattr("src.bot.rss_bot.requests.post", post)
     bot = RSSBot(
@@ -109,6 +109,50 @@ def test_bot_retries_when_slack_returns_http_error(mock_rss_parser, monkeypatch)
 
     assert post.call_count == 2
     assert "Test Trend" not in bot.trend_dict
+
+
+def test_bot_does_not_log_the_slack_webhook_on_http_failure(
+    mock_rss_parser, monkeypatch, caplog
+):
+    webhook_url = "https://hooks.slack.test/services/T000/B000/SUPERSECRET"
+    response = requests.Response()
+    response.status_code = 500
+    response.url = webhook_url
+    monkeypatch.setattr(
+        "src.bot.rss_bot.requests.post", Mock(return_value=response)
+    )
+    bot = RSSBot(
+        rss_parser=mock_rss_parser,
+        interval=10,
+        webhook_url=webhook_url,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="RSSBot"):
+        bot.job()
+
+    assert webhook_url not in caplog.text
+    assert "Slack webhook returned HTTP 500" in caplog.text
+
+
+def test_bot_does_not_log_the_slack_webhook_on_transport_failure(
+    mock_rss_parser, monkeypatch, caplog
+):
+    webhook_url = "https://hooks.slack.test/services/T000/B000/SUPERSECRET"
+    monkeypatch.setattr(
+        "src.bot.rss_bot.requests.post",
+        Mock(side_effect=requests.ConnectionError(f"failed: {webhook_url}")),
+    )
+    bot = RSSBot(
+        rss_parser=mock_rss_parser,
+        interval=10,
+        webhook_url=webhook_url,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="RSSBot"):
+        bot.job()
+
+    assert webhook_url not in caplog.text
+    assert "Slack webhook request failed" in caplog.text
 
 
 def test_bot_job_handles_parser_error_without_unbound_local_error_and_cleans_pending_titles(test_bot, mock_rss_parser, mock_send_alert):
@@ -143,6 +187,45 @@ def test_bot_job_cleans_pending_titles_when_send_alert_fails(test_bot, mock_rss_
 
     assert "Trend A" in test_bot.trend_dict
     assert "Trend B" not in test_bot.trend_dict
+    assert not test_bot._pending_titles
+
+
+def test_bot_job_continues_after_one_payload_is_rejected(
+    test_bot, mock_rss_parser, mock_send_alert
+):
+    mock_rss_parser.parse.return_value = [
+        {
+            "title": "Bad Trend",
+            "content": "rejected payload",
+            "link": "http://example.com/bad",
+            "published": "now",
+            "parsed_time": datetime.now(timezone("Asia/Seoul")),
+        },
+        {
+            "title": "Good Trend",
+            "content": "valid payload",
+            "link": "http://example.com/good",
+            "published": "now",
+            "parsed_time": datetime.now(timezone("Asia/Seoul")),
+        },
+    ]
+
+    def send_alert(message):
+        if message.startswith("Bad Trend\n"):
+            raise RuntimeError("payload rejected")
+
+    mock_send_alert.side_effect = send_alert
+
+    test_bot.job()
+    test_bot.job()
+
+    attempted_titles = [
+        call.args[0].splitlines()[0]
+        for call in mock_send_alert.call_args_list
+    ]
+    assert attempted_titles == ["Bad Trend", "Good Trend", "Bad Trend"]
+    assert "Bad Trend" not in test_bot.trend_dict
+    assert "Good Trend" in test_bot.trend_dict
     assert not test_bot._pending_titles
 
 
@@ -249,18 +332,22 @@ def test_bot_instances_do_not_share_scheduler_jobs(test_bot, mock_rss_parser, mo
 
 
 def test_bot_stop_timeout_does_not_duplicate_jobs_on_restart(test_bot):
-    start_gate = Barrier(2)
+    start_gate = Event()
     release_gate = Event()
     original_run = test_bot.run
+    first_run = True
 
     def blocked_run():
-        start_gate.wait(timeout=1)
-        release_gate.wait(timeout=1)
+        nonlocal first_run
+        if first_run:
+            first_run = False
+            start_gate.set()
+            release_gate.wait(timeout=1)
         original_run()
 
     with patch.object(test_bot, "run", side_effect=blocked_run):
         assert test_bot.start()
-        start_gate.wait(timeout=1)
+        assert start_gate.wait(timeout=1)
         first_thread = test_bot.thread
         test_bot.stop_timeout = 0.01
         assert not test_bot.stop()

@@ -6,6 +6,7 @@ import pytest
 from src.crawl_scripts.google_trends_crawl import (
     _extract_trend_data,
     _open_detail_panel,
+    crawl,
 )
 
 
@@ -134,3 +135,87 @@ def test_extract_trend_data_uses_first_news_title_and_link_match():
             "URL": "https://example.test/primary",
         }
     ]
+
+
+def test_crawl_returns_the_canonical_structured_error():
+    page = Mock()
+    page.goto = AsyncMock(side_effect=RuntimeError("browser unavailable"))
+
+    result = asyncio.run(crawl(page, Mock(), None))
+
+    assert result == {
+        "status": "error",
+        "error": {
+            "code": "crawl_failed",
+            "message": "browser unavailable",
+        },
+    }
+
+
+def test_crawl_rejects_total_extraction_failure(monkeypatch):
+    page = Mock()
+    page.goto = AsyncMock()
+    page.wait_for_selector = AsyncMock()
+    page.query_selector_all = AsyncMock(return_value=[Mock()])
+    page.query_selector = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        "src.crawl_scripts.google_trends_crawl._open_detail_panel",
+        AsyncMock(side_effect=RuntimeError("detail selector drift")),
+    )
+
+    result = asyncio.run(crawl(page, Mock(), None))
+
+    assert result == {
+        "status": "error",
+        "error": {
+            "code": "crawl_failed",
+            "message": "Failed to extract any of 1 discovered trend rows",
+        },
+    }
+
+
+def test_crawl_allows_a_valid_empty_page():
+    page = Mock()
+    page.goto = AsyncMock()
+    page.wait_for_selector = AsyncMock()
+    page.query_selector_all = AsyncMock(return_value=[])
+    page.query_selector = AsyncMock(return_value=None)
+
+    result = asyncio.run(crawl(page, Mock(), None))
+
+    assert result == {"status": "success", "data": []}
+
+
+def test_crawl_keeps_successful_rows_after_a_partial_extraction_failure(
+    monkeypatch,
+):
+    first_row = Mock()
+    second_row = Mock()
+    detail_panel = Mock()
+    page = Mock()
+    page.goto = AsyncMock()
+    page.wait_for_selector = AsyncMock()
+    page.query_selector_all = AsyncMock(
+        return_value=[first_row, second_row]
+    )
+    page.query_selector = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        "src.crawl_scripts.google_trends_crawl._open_detail_panel",
+        AsyncMock(return_value=detail_panel),
+    )
+    monkeypatch.setattr(
+        "src.crawl_scripts.google_trends_crawl._extract_trend_data",
+        AsyncMock(
+            side_effect=[
+                RuntimeError("first row failed"),
+                {"트렌드 제목": "Good Trend"},
+            ]
+        ),
+    )
+
+    result = asyncio.run(crawl(page, Mock(), None))
+
+    assert result == {
+        "status": "success",
+        "data": [{"트렌드 제목": "Good Trend"}],
+    }

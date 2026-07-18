@@ -5,6 +5,7 @@ import pytest
 
 from src.bot.rss_bot import RSSBot
 from src.bot.scraper import Scraper
+from src.common.scrape_contracts import ScrapeResult
 from src.main import create_app
 
 
@@ -42,7 +43,9 @@ def test_bot(mock_rss_parser, mock_send_alert):
 @pytest.fixture
 def test_scraper():
     scraper = Scraper()
-    scraper.scrape_trends = AsyncMock(return_value={"status": "success", "data": [{"trend": "Test Trend"}]})
+    scraper.scrape_trends = AsyncMock(
+        return_value=ScrapeResult.success([{"trend": "Test Trend"}])
+    )
     return scraper
 
 

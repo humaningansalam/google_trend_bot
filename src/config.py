@@ -1,4 +1,19 @@
 import os
+from enum import Enum
+
+
+class ScraperBackend(str, Enum):
+    LOCAL = "local"
+    REMOTE = "remote"
+
+
+def parse_scraper_backend(value: str) -> ScraperBackend:
+    normalized = value.strip().lower()
+    if normalized == "false":
+        return ScraperBackend.LOCAL
+    if normalized == "true":
+        return ScraperBackend.REMOTE
+    raise ValueError("USE_SERVER must be either True or False")
 
 
 class Config:
@@ -14,6 +29,7 @@ class Config:
         raise ValueError("SCHEDULE_INTERVAL must be a positive integer")
 
     CONTROL_TOKEN = os.getenv("CONTROL_TOKEN")
+    SCRAPER_BACKEND = parse_scraper_backend(os.getenv("USE_SERVER", "False"))
     LOKI_URL = os.getenv("LOKI_URL")
     LOKI_TAGS = {
         "app": os.getenv("APP_NAME", "google-trend-bot"),

@@ -10,6 +10,10 @@ from pytz import timezone
 from src.common.metrics import metrics
 
 
+class SlackDeliveryError(RuntimeError):
+    pass
+
+
 class RSSBot:
     def __init__(
         self,
@@ -38,13 +42,21 @@ class RSSBot:
 
     def _send_alert(self, message):
         if not self.webhook_url:
-            raise ValueError("SLACK_WEBHOOK is required to send trend alerts")
-        response = requests.post(
-            self.webhook_url,
-            json={"text": message},
-            timeout=5,
-        )
-        response.raise_for_status()
+            raise SlackDeliveryError(
+                "SLACK_WEBHOOK is required to send trend alerts"
+            )
+        try:
+            response = requests.post(
+                self.webhook_url,
+                json={"text": message},
+                timeout=5,
+            )
+        except requests.RequestException:
+            raise SlackDeliveryError("Slack webhook request failed") from None
+        if not 200 <= response.status_code < 300:
+            raise SlackDeliveryError(
+                f"Slack webhook returned HTTP {response.status_code}"
+            )
 
     def _register_jobs(self):
         self._scheduler.clear()
@@ -68,6 +80,7 @@ class RSSBot:
         new_entries = []
         with metrics.request_time.time():
             try:
+                had_delivery_failure = False
                 entries = list(
                     self.rss_parser.parse("https://trends.google.com/trending/rss?geo=KR")
                 )
@@ -93,9 +106,17 @@ class RSSBot:
                     except Exception:
                         with self._trend_lock:
                             self._pending_titles.discard(entry["title"])
-                        raise
+                        had_delivery_failure = True
+                        self.logger.error(
+                            "Trend alert delivery failed",
+                            exc_info=True,
+                            extra={"trend": entry},
+                        )
 
-                metrics.completed_jobs.inc()
+                if had_delivery_failure:
+                    metrics.inc_error("job_execution_error")
+                else:
+                    metrics.completed_jobs.inc()
             except Exception:
                 with self._trend_lock:
                     self._pending_titles.difference_update({entry["title"] for entry in new_entries})
