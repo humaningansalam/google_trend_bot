@@ -1,19 +1,20 @@
 [project]
 name = "google-trend-bot"
-version = "0.3.3"
+version = "0.3.4"
 description = "Google Trends alerts for Slack with a Flask control surface"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "feedparser>=6.0.12",
     "pandas>=2.3.3",
-    "playwright>=1.56.0",
+    "playwright>=1.61.0",
     "pytz>=2025.2",
     "requests>=2.32.5",
     "schedule>=1.2.2",
     "his-monitoring",
     "prometheus-client>=0.23.1",
     "flask[async]>=3.1.2",
+    "gunicorn>=23.0.0",
 ]
 [tool.uv.sources]
 his-monitoring = { git = "https://github.com/humaningansalam/his-monitoring.git", branch = "main" }

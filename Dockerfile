@@ -5,10 +5,8 @@ ARG INSTALL_DEV=false
 
 ENV VERSION=$VERSION
 ENV SLACK_WEBHOOK=api_key
-ENV LOKI_URL=loki_url
 ENV LOG_LEVEL=INFO
 ENV SCHEDULE_INTERVAL=10
-ENV CONTROL_TOKEN=
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
@@ -31,12 +29,12 @@ RUN apt-get update \
 
 COPY pyproject.toml uv.lock* ./
 
-RUN uv sync --frozen --python 3.11 --no-install-project && \
+RUN uv sync --frozen --python 3.11 --no-dev --no-install-project && \
     if [ "$INSTALL_DEV" = "true" ]; then \
         uv sync --frozen --python 3.11 --group dev --no-install-project; \
     fi
 
-RUN uv run playwright install --with-deps chromium
+RUN .venv/bin/playwright install --with-deps chromium
 
 COPY . .
 
@@ -44,4 +42,4 @@ ENV PATH="/usr/src/app/.venv/bin:$PATH"
 
 EXPOSE 5000
 
-CMD ["python", "-m", "src.main"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "src.main:create_runtime_app()"]
