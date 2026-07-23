@@ -1,6 +1,8 @@
 import asyncio
 from unittest.mock import Mock
 
+import pytest
+
 from src.bot import scraper as scraper_module
 from src.bot.scraper import Scraper
 from src.clients.playwright_submit import (
@@ -95,6 +97,36 @@ def test_remote_scraper_maps_typed_job_errors():
     assert result.error.message == "poll limit reached"
 
 
+@pytest.mark.parametrize(
+    ("remote_code", "expected_code"),
+    [
+        (
+            RemoteJobErrorCode.JOB_CANCELLED,
+            ScrapeErrorCode.REMOTE_JOB_CANCELLED,
+        ),
+        (
+            RemoteJobErrorCode.JOB_INTERRUPTED,
+            ScrapeErrorCode.REMOTE_JOB_INTERRUPTED,
+        ),
+    ],
+)
+def test_remote_scraper_maps_terminal_lifecycle_errors(remote_code, expected_code):
+    job_client = Mock()
+    job_client.execute.return_value = RemoteJobResult.failure(
+        remote_code,
+        "remote lifecycle ended",
+    )
+    scraper = Scraper(
+        backend=ScraperBackend.REMOTE,
+        job_client=job_client,
+    )
+
+    result = asyncio.run(scraper.scrape_trends())
+
+    assert result.error.code is expected_code
+    assert result.error.message == "remote lifecycle ended"
+
+
 def test_remote_scraper_decodes_the_canonical_wire_result():
     job_client = Mock()
     job_client.execute.return_value = RemoteJobResult.success(
@@ -103,7 +135,7 @@ def test_remote_scraper_decodes_the_canonical_wire_result():
                 "status": "success",
                 "data": [{"trend": "Remote Trend"}],
             },
-            files={"artifact.txt": "/api/jobs/download/1"},
+            files={"artifact.txt": "/api/jobs/download/job-1/artifact.txt"},
         )
     )
     scraper = Scraper(

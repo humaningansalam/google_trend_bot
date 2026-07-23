@@ -1,6 +1,7 @@
 import logging
 from unittest.mock import Mock
 
+import pytest
 import requests
 
 from src.clients.playwright_submit import (
@@ -27,6 +28,7 @@ def test_execute_returns_the_remote_result_envelope(monkeypatch, tmp_path):
             response(
                 200,
                 {
+                    "status": "COMPLETED",
                     "result": {"status": "success", "data": []},
                     "files": {},
                 },
@@ -59,12 +61,13 @@ def test_execute_does_not_download_result_artifacts(monkeypatch, tmp_path):
             response(
                 200,
                 {
+                    "status": "COMPLETED",
                     "result": {
                         "status": "success",
                         "data": [{"trend": "Remote Trend"}],
                     },
                     "files": {
-                        "artifact.txt": "/api/jobs/download/1"
+                        "artifact.txt": "/api/jobs/download/job-1/artifact.txt"
                     },
                 },
             ),
@@ -81,7 +84,7 @@ def test_execute_does_not_download_result_artifacts(monkeypatch, tmp_path):
                 "status": "success",
                 "data": [{"trend": "Remote Trend"}],
             },
-            files={"artifact.txt": "/api/jobs/download/1"},
+            files={"artifact.txt": "/api/jobs/download/job-1/artifact.txt"},
         )
     )
     assert get.call_count == 2
@@ -153,17 +156,76 @@ def test_execute_preserves_failed_job_as_a_typed_failure(monkeypatch, tmp_path):
         "src.clients.playwright_submit.requests.post",
         Mock(return_value=response(202, {"job_id": "job-1"})),
     )
-    get = Mock(return_value=response(200, {"status": "FAILED"}))
+    get = Mock(
+        side_effect=[
+            response(200, {"status": "FAILED"}),
+            response(
+                200,
+                {
+                    "status": "FAILED",
+                    "result": {
+                        "code": "USER_SCRIPT_FAILED",
+                        "message": "crawl exploded",
+                    },
+                },
+            ),
+        ]
+    )
     monkeypatch.setattr("src.clients.playwright_submit.requests.get", get)
     client = PlaywrightJobClient(server_url="http://playwright-server")
 
     result = client.execute(str(script), "google_trends_crawl")
 
     assert result.error.code is RemoteJobErrorCode.JOB_FAILED
-    get.assert_called_once_with(
-        "http://playwright-server/api/jobs/status/job-1",
-        timeout=10,
+    assert result.error.message == "crawl exploded"
+    assert result.error.remote_code == "USER_SCRIPT_FAILED"
+    assert get.call_args_list == [
+        (("http://playwright-server/api/jobs/status/job-1",), {"timeout": 10}),
+        (("http://playwright-server/api/jobs/results/job-1",), {"timeout": 30}),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("state", "remote_code", "expected_code"),
+    [
+        ("CANCELLED", "JOB_CANCELLED", RemoteJobErrorCode.JOB_CANCELLED),
+        ("INTERRUPTED", "SERVICE_SHUTDOWN", RemoteJobErrorCode.JOB_INTERRUPTED),
+    ],
+)
+def test_execute_handles_all_terminal_failure_states(
+    monkeypatch, tmp_path, state, remote_code, expected_code
+):
+    script = tmp_path / "crawl.py"
+    script.write_text("async def crawl(): pass", encoding="utf-8")
+    monkeypatch.setattr(
+        "src.clients.playwright_submit.requests.post",
+        Mock(return_value=response(202, {"job_id": "job-1"})),
     )
+    monkeypatch.setattr(
+        "src.clients.playwright_submit.requests.get",
+        Mock(
+            side_effect=[
+                response(200, {"status": state}),
+                response(
+                    200,
+                    {
+                        "status": state,
+                        "result": {
+                            "code": remote_code,
+                            "message": f"job ended as {state.lower()}",
+                        },
+                    },
+                ),
+            ]
+        ),
+    )
+    client = PlaywrightJobClient(server_url="http://playwright-server")
+
+    result = client.execute(str(script), "google_trends_crawl")
+
+    assert result.error.code is expected_code
+    assert result.error.message == f"job ended as {state.lower()}"
+    assert result.error.remote_code == remote_code
 
 
 def test_download_files_rejects_job_id_outside_download_root(monkeypatch, tmp_path):
@@ -174,7 +236,7 @@ def test_download_files_rejects_job_id_outside_download_root(monkeypatch, tmp_pa
 
     result = client.download_files(
         "../outside-job",
-        {"artifact.txt": "/api/jobs/download/1"},
+        {"artifact.txt": "/api/jobs/download/job-1/artifact.txt"},
     )
 
     assert result.error.code is RemoteJobErrorCode.DOWNLOAD_FAILED
@@ -189,7 +251,7 @@ def test_download_files_rejects_filename_outside_job_directory(monkeypatch, tmp_
 
     result = client.download_files(
         "safe-job",
-        {"../../outside-file.txt": "/api/jobs/download/2"},
+        {"../../outside-file.txt": "/api/jobs/download/job-2/artifact.txt"},
     )
 
     assert result.error.code is RemoteJobErrorCode.DOWNLOAD_FAILED
@@ -204,7 +266,22 @@ def test_download_files_rejects_noncanonical_download_url(monkeypatch, tmp_path)
 
     result = client.download_files(
         "safe-job",
-        {"artifact.txt": "/other/api/jobs/download/2"},
+        {"artifact.txt": "/other/api/jobs/download/job-2/artifact.txt"},
+    )
+
+    assert result.error.code is RemoteJobErrorCode.INVALID_RESPONSE
+    get.assert_not_called()
+
+
+def test_download_files_rejects_download_url_without_filename(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    get = Mock()
+    monkeypatch.setattr("src.clients.playwright_submit.requests.get", get)
+    client = PlaywrightJobClient(server_url="http://playwright-server")
+
+    result = client.download_files(
+        "safe-job",
+        {"artifact.txt": "/api/jobs/download/job-3"},
     )
 
     assert result.error.code is RemoteJobErrorCode.INVALID_RESPONSE
@@ -221,7 +298,7 @@ def test_download_files_saves_safe_result(monkeypatch, tmp_path):
 
     result = client.download_files(
         "safe-job",
-        {"artifact.txt": "/api/jobs/download/3"},
+        {"artifact.txt": "/api/jobs/download/job-3/artifact.txt"},
     )
 
     assert result.is_success
@@ -229,7 +306,7 @@ def test_download_files_saves_safe_result(monkeypatch, tmp_path):
         tmp_path / "downloads" / "safe-job" / "artifact.txt"
     ).read_bytes() == b"safe result"
     get.assert_called_once_with(
-        "http://playwright-server/api/jobs/download/3",
+        "http://playwright-server/api/jobs/download/job-3/artifact.txt",
         stream=True,
         timeout=60,
     )
@@ -243,7 +320,7 @@ def test_download_files_does_not_log_authenticated_server_url(
     server_url = f"http://user:{secret}@playwright-server"
     failed_response = requests.Response()
     failed_response.status_code = 500
-    failed_response.url = f"{server_url}/api/jobs/download/4"
+    failed_response.url = f"{server_url}/api/jobs/download/job-4/artifact.txt"
     monkeypatch.setattr(
         "src.clients.playwright_submit.requests.get",
         Mock(return_value=failed_response),
@@ -253,7 +330,7 @@ def test_download_files_does_not_log_authenticated_server_url(
     with caplog.at_level(logging.ERROR):
         result = client.download_files(
             "safe-job",
-            {"artifact.txt": "/api/jobs/download/4"},
+            {"artifact.txt": "/api/jobs/download/job-4/artifact.txt"},
         )
 
     assert result.error.code is RemoteJobErrorCode.DOWNLOAD_FAILED

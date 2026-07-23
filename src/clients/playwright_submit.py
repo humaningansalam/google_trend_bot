@@ -26,6 +26,12 @@ class RemoteJobState(str, Enum):
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    INTERRUPTED = "INTERRUPTED"
+
+    @property
+    def is_terminal(self) -> bool:
+        return self not in {RemoteJobState.PENDING, RemoteJobState.RUNNING}
 
 
 class RemoteJobErrorCode(str, Enum):
@@ -34,6 +40,8 @@ class RemoteJobErrorCode(str, Enum):
     INVALID_RESPONSE = "invalid_response"
     JOB_NOT_FOUND = "job_not_found"
     JOB_FAILED = "job_failed"
+    JOB_CANCELLED = "job_cancelled"
+    JOB_INTERRUPTED = "job_interrupted"
     JOB_TIMEOUT = "job_timeout"
     RESULT_NOT_READY = "result_not_ready"
     REMOTE_UNAVAILABLE = "remote_unavailable"
@@ -44,6 +52,7 @@ class RemoteJobErrorCode(str, Enum):
 class RemoteJobError:
     code: RemoteJobErrorCode
     message: str
+    remote_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -64,8 +73,19 @@ class RemoteJobResult(Generic[T]):
         return cls(value=value)
 
     @classmethod
-    def failure(cls, code: RemoteJobErrorCode, message: str):
-        return cls(error=RemoteJobError(code=code, message=message))
+    def failure(
+        cls,
+        code: RemoteJobErrorCode,
+        message: str,
+        remote_code: str | None = None,
+    ):
+        return cls(
+            error=RemoteJobError(
+                code=code,
+                message=message,
+                remote_code=remote_code,
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -101,13 +121,7 @@ class PlaywrightJobClient:
         if not poll_result.is_success:
             return RemoteJobResult(error=poll_result.error)
 
-        if poll_result.value is RemoteJobState.FAILED:
-            return RemoteJobResult.failure(
-                RemoteJobErrorCode.JOB_FAILED,
-                "Remote Playwright job failed",
-            )
-
-        result = self._get_results(job_id)
+        result = self._get_results(job_id, poll_result.value)
         if not result.is_success:
             return RemoteJobResult(error=result.error)
         return result
@@ -196,7 +210,7 @@ class PlaywrightJobClient:
                     "Remote status response contains an unknown job state",
                 )
 
-            if state in {RemoteJobState.COMPLETED, RemoteJobState.FAILED}:
+            if state.is_terminal:
                 return RemoteJobResult.success(state)
             self.sleep(self.poll_interval)
 
@@ -205,7 +219,9 @@ class PlaywrightJobClient:
             f"Remote job did not finish after {self.max_poll_attempts} polls",
         )
 
-    def _get_results(self, job_id: str) -> RemoteJobResult[JobResultEnvelope]:
+    def _get_results(
+        self, job_id: str, expected_state: RemoteJobState
+    ) -> RemoteJobResult[JobResultEnvelope]:
         try:
             response = requests.get(
                 f"{self.server_url}/api/jobs/results/{job_id}", timeout=30
@@ -234,7 +250,25 @@ class PlaywrightJobClient:
                 "Remote result response is not valid JSON",
             )
 
-        if not isinstance(payload, Mapping) or "result" not in payload:
+        raw_state = payload.get("status") if isinstance(payload, Mapping) else None
+        try:
+            state = RemoteJobState(raw_state)
+        except (TypeError, ValueError):
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.INVALID_RESPONSE,
+                "Remote result response contains an unknown job state",
+            )
+        if state is not expected_state:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.INVALID_RESPONSE,
+                "Remote result response does not match the terminal job state",
+            )
+        if not state.is_terminal:
+            return RemoteJobResult.failure(
+                RemoteJobErrorCode.RESULT_NOT_READY,
+                f"Remote job result is not ready: {job_id}",
+            )
+        if "result" not in payload:
             return RemoteJobResult.failure(
                 RemoteJobErrorCode.INVALID_RESPONSE,
                 "Remote result response must contain a result field",
@@ -245,7 +279,37 @@ class PlaywrightJobClient:
                 "Remote result field must not be null",
             )
 
-        files = payload.get("files", {})
+        if state is not RemoteJobState.COMPLETED:
+            result = payload["result"]
+            if not isinstance(result, Mapping):
+                return RemoteJobResult.failure(
+                    RemoteJobErrorCode.INVALID_RESPONSE,
+                    "Remote terminal result must contain an error object",
+                )
+            remote_code = result.get("code")
+            message = result.get("message")
+            if not isinstance(remote_code, str) or not remote_code:
+                return RemoteJobResult.failure(
+                    RemoteJobErrorCode.INVALID_RESPONSE,
+                    "Remote terminal error must contain a code",
+                )
+            if not isinstance(message, str) or not message:
+                return RemoteJobResult.failure(
+                    RemoteJobErrorCode.INVALID_RESPONSE,
+                    "Remote terminal error must contain a message",
+                )
+            error_codes = {
+                RemoteJobState.FAILED: RemoteJobErrorCode.JOB_FAILED,
+                RemoteJobState.CANCELLED: RemoteJobErrorCode.JOB_CANCELLED,
+                RemoteJobState.INTERRUPTED: RemoteJobErrorCode.JOB_INTERRUPTED,
+            }
+            return RemoteJobResult.failure(
+                error_codes[state],
+                message,
+                remote_code=remote_code,
+            )
+
+        files = payload.get("files") or {}
         if not isinstance(files, Mapping) or not all(
             isinstance(name, str) and isinstance(url, str)
             for name, url in files.items()
@@ -333,4 +397,4 @@ def _is_download_path(value: str) -> bool:
     if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
         return False
     parts = PurePosixPath(parsed.path).parts
-    return len(parts) >= 5 and parts[:4] == ("/", "api", "jobs", "download")
+    return len(parts) == 6 and parts[:4] == ("/", "api", "jobs", "download")
