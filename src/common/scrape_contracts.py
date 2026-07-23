@@ -10,6 +10,8 @@ class ScrapeErrorCode(str, Enum):
     REMOTE_SUBMISSION_FAILED = "remote_submission_failed"
     REMOTE_JOB_NOT_FOUND = "remote_job_not_found"
     REMOTE_JOB_FAILED = "remote_job_failed"
+    REMOTE_JOB_CANCELLED = "remote_job_cancelled"
+    REMOTE_JOB_INTERRUPTED = "remote_job_interrupted"
     REMOTE_JOB_TIMEOUT = "remote_job_timeout"
     REMOTE_RESULT_NOT_READY = "remote_result_not_ready"
     REMOTE_DOWNLOAD_FAILED = "remote_download_failed"

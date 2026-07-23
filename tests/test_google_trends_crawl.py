@@ -137,19 +137,12 @@ def test_extract_trend_data_uses_first_news_title_and_link_match():
     ]
 
 
-def test_crawl_returns_the_canonical_structured_error():
+def test_crawl_propagates_navigation_failure():
     page = Mock()
     page.goto = AsyncMock(side_effect=RuntimeError("browser unavailable"))
 
-    result = asyncio.run(crawl(page, Mock(), None))
-
-    assert result == {
-        "status": "error",
-        "error": {
-            "code": "crawl_failed",
-            "message": "browser unavailable",
-        },
-    }
+    with pytest.raises(RuntimeError, match="browser unavailable"):
+        asyncio.run(crawl(page, Mock(), None))
 
 
 def test_crawl_rejects_total_extraction_failure(monkeypatch):
@@ -163,15 +156,11 @@ def test_crawl_rejects_total_extraction_failure(monkeypatch):
         AsyncMock(side_effect=RuntimeError("detail selector drift")),
     )
 
-    result = asyncio.run(crawl(page, Mock(), None))
-
-    assert result == {
-        "status": "error",
-        "error": {
-            "code": "crawl_failed",
-            "message": "Failed to extract any of 1 discovered trend rows",
-        },
-    }
+    with pytest.raises(
+        RuntimeError,
+        match="Failed to extract any of 1 discovered trend rows",
+    ):
+        asyncio.run(crawl(page, Mock(), None))
 
 
 def test_crawl_allows_a_valid_empty_page():

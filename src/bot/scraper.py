@@ -18,6 +18,8 @@ REMOTE_ERROR_CODES = {
     RemoteJobErrorCode.INVALID_RESPONSE: ScrapeErrorCode.INVALID_RESPONSE,
     RemoteJobErrorCode.JOB_NOT_FOUND: ScrapeErrorCode.REMOTE_JOB_NOT_FOUND,
     RemoteJobErrorCode.JOB_FAILED: ScrapeErrorCode.REMOTE_JOB_FAILED,
+    RemoteJobErrorCode.JOB_CANCELLED: ScrapeErrorCode.REMOTE_JOB_CANCELLED,
+    RemoteJobErrorCode.JOB_INTERRUPTED: ScrapeErrorCode.REMOTE_JOB_INTERRUPTED,
     RemoteJobErrorCode.JOB_TIMEOUT: ScrapeErrorCode.REMOTE_JOB_TIMEOUT,
     RemoteJobErrorCode.RESULT_NOT_READY: ScrapeErrorCode.REMOTE_RESULT_NOT_READY,
     RemoteJobErrorCode.REMOTE_UNAVAILABLE: ScrapeErrorCode.REMOTE_UNAVAILABLE,

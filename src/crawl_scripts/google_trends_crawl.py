@@ -66,20 +66,14 @@ async def crawl(page: Page, context: BrowserContext, job_path: str):
                 f"{rows_discovered} discovered trend rows"
             )
             logging.error(message)
-            return {
-                "status": "error",
-                "error": {"code": "crawl_failed", "message": message},
-            }
+            raise RuntimeError(message)
 
         logging.info(f"Finished crawling. Collected {len(data)} items.")
         return {"status": "success", "data": data}
 
     except Exception as e:
         logging.error(f"Crawl error: {str(e)}", exc_info=True)
-        return {
-            "status": "error",
-            "error": {"code": "crawl_failed", "message": str(e)},
-        }
+        raise
 
 async def _open_detail_panel(page, tr):
     title_elem = await tr.query_selector(".mZ3RIc")
