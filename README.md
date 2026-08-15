@@ -50,7 +50,8 @@ On Linux hosts that do not already have Chromium system libraries, run `uv run p
 
 ## Endpoints
 
-- `GET /health` returns `Healthy`.
+- `GET /health` returns `Healthy` and includes `X-Bot-Active: true|false` so
+  operators can distinguish HTTP process liveness from the RSS worker state.
 - `POST /start` returns `{"status":"success","state":"running"}` after starting the RSS bot.
 - `POST /stop` returns a success response with `state` set to `stopped` or `stopping`.
 - `POST /reset` clears old trend memory and returns `{"status":"success"}`.
