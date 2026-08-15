@@ -1,34 +1,33 @@
-# src/crawl_scripts/google_trends_crawl.py
-
-from playwright.async_api import Page, BrowserContext
 import logging
 
+from playwright.async_api import BrowserContext, Page
+
+
 async def crawl(page: Page, context: BrowserContext, job_path: str):
-    """구글 트렌드 크롤링 함수 """
+    """구글 트렌드 크롤링 함수"""
     try:
         logging.info(f"Crawling Google Trends. Job path: {job_path}")
-        
-        # 페이지 이동 및 초기 설정
+
         await page.goto(
             "https://trends.google.co.kr/trending?geo=KR&hl=ko&hours=24",
             wait_until="domcontentloaded",
-            timeout=90000
+            timeout=90000,
         )
         await page.wait_for_selector("tbody[jsname='cC57zf']", timeout=60000)
 
-        # 크롤링 실행
         data = []
         rows_discovered = 0
         max_pages = 5
         current_page = 1
         while current_page <= max_pages:
-            tr_elements = await page.query_selector_all("tbody[jsname='cC57zf'] tr[jsname='oKdM2c']")
+            tr_elements = await page.query_selector_all(
+                "tbody[jsname='cC57zf'] tr[jsname='oKdM2c']"
+            )
             rows_discovered += len(tr_elements)
 
             for tr_index, tr in enumerate(tr_elements):
                 try:
-                    detail_panel = await _open_detail_panel(page, tr)
-                    trend_data = await _extract_trend_data(tr, detail_panel)
+                    trend_data = await _extract_trend_data(page, tr)
                 except Exception as row_error:
                     logging.warning(
                         "Error extracting trend item "
@@ -37,22 +36,21 @@ async def crawl(page: Page, context: BrowserContext, job_path: str):
                     continue
 
                 data.append(trend_data)
-                logging.info(f"Collected item {len(data)}: {trend_data.get('트렌드 제목')}")
+                logging.info(
+                    "Collected item %s: %s",
+                    len(data),
+                    trend_data.get("트렌드 제목"),
+                )
 
-            # 다음 페이지로 넘어갈지 결정
             next_button = await page.query_selector("button[jsname='ViaHrd']")
-
             if not next_button:
                 logging.info("Next button not found. Assuming end of pages.")
                 break
-
-            is_next_button_disabled = await next_button.is_disabled()
-            if is_next_button_disabled:
+            if await next_button.is_disabled():
                 logging.info("Next button is disabled. Assuming end of pages.")
                 break
-
             if current_page >= max_pages:
-                logging.warning(f"Reached max_pages={max_pages}. Stopping crawl.")
+                logging.warning("Reached max_pages=%s. Stopping crawl.", max_pages)
                 break
 
             logging.info("Next button is active. Clicking to go to the next page.")
@@ -68,14 +66,15 @@ async def crawl(page: Page, context: BrowserContext, job_path: str):
             logging.error(message)
             raise RuntimeError(message)
 
-        logging.info(f"Finished crawling. Collected {len(data)} items.")
+        logging.info("Finished crawling. Collected %s items.", len(data))
         return {"status": "success", "data": data}
-
-    except Exception as e:
-        logging.error(f"Crawl error: {str(e)}", exc_info=True)
+    except Exception as error:
+        logging.error("Crawl error: %s", error, exc_info=True)
         raise
 
-async def _open_detail_panel(page, tr):
+
+async def _extract_trend_data(page, tr):
+    """트렌드 행을 열고 연결된 상세 패널에서 데이터를 추출한다."""
     title_elem = await tr.query_selector(".mZ3RIc")
     if not title_elem:
         raise ValueError("Trend row is missing a title")
@@ -87,23 +86,15 @@ async def _open_detail_panel(page, tr):
         has=page.get_by_role("heading", name=trend_title, exact=True)
     )
     await detail_panel.wait_for(state="visible", timeout=15000)
-    return detail_panel
 
-
-async def _extract_trend_data(tr, detail_panel):
-    """트렌드 데이터 추출"""
-    title_elem = await tr.query_selector(".mZ3RIc")
     volume_elem = await tr.query_selector(".lqv0Cb")
-    
-    trend_title = await title_elem.inner_text() if title_elem else "N/A"
     search_volume = await volume_elem.inner_text() if volume_elem else "N/A"
 
-    # 트렌드 분석 데이터
-    selector = "span[jsname='V67aGc']:not([aria-hidden='true'])"
-    analysis_elems = await detail_panel.locator(selector).all()
-    trend_analysis = [await elem.inner_text() for elem in analysis_elems]
+    analysis_selector = "span[jsname='V67aGc']:not([aria-hidden='true'])"
+    trend_analysis = await detail_panel.locator(
+        analysis_selector
+    ).all_inner_texts()
 
-    # 뉴스 데이터
     news_data = []
     news_elems = await detail_panel.locator(
         "div[jsaction='click:vx9mmb;contextmenu:rbJKIe']"
@@ -111,15 +102,17 @@ async def _extract_trend_data(tr, detail_panel):
     for news in news_elems:
         title_elem = news.locator(".QbLC8c").first
         link_elem = news.locator("a").first
-
         if await title_elem.count() and await link_elem.count():
-            news_title = await title_elem.inner_text()
-            news_url = await link_elem.get_attribute("href")
-            news_data.append({"뉴스 제목": news_title, "URL": news_url})
+            news_data.append(
+                {
+                    "뉴스 제목": await title_elem.inner_text(),
+                    "URL": await link_elem.get_attribute("href"),
+                }
+            )
 
     return {
         "트렌드 제목": trend_title,
         "검색량": search_volume,
         "트렌드 분석": trend_analysis,
-        "뉴스 데이터": news_data
+        "뉴스 데이터": news_data,
     }

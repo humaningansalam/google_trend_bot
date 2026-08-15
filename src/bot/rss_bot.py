@@ -30,7 +30,6 @@ class RSSBot:
         self.sleep_interval = sleep_interval
         self.webhook_url = webhook_url
         self.alert_sender = alert_sender or self._send_alert
-        self.is_running = False
         self.thread = None
         self._stop_event = Event()
         self._state_lock = Lock()
@@ -63,18 +62,13 @@ class RSSBot:
         self._scheduler.every(self.interval).minutes.do(self.job)
         self._scheduler.every().day.at("00:00").do(self.reset_trend)
 
-    def _is_worker_alive(self):
-        return self.thread is not None and self.thread.is_alive()
-
-    def _sync_runtime_state(self):
-        if self.thread is not None and not self.thread.is_alive():
-            self.thread = None
-            self.is_running = False
+    @property
+    def is_running(self):
+        return self.is_active()
 
     def is_active(self):
         with self._state_lock:
-            self._sync_runtime_state()
-            return self._is_worker_alive()
+            return self.thread is not None and self.thread.is_alive()
 
     def job(self):
         new_entries = []
@@ -93,25 +87,26 @@ class RSSBot:
                         new_entries.append(entry)
 
                 for entry in new_entries:
-                    message = f"{entry['title']}\n{entry['content']}\n{entry['link']}\n{entry['published']}"
+                    title = entry["title"]
+                    message = f"{title}\n{entry['content']}\n{entry['link']}\n{entry['published']}"
                     try:
                         self.alert_sender(message)
                         with self._trend_lock:
-                            self.trend_dict[entry["title"]] = entry["parsed_time"]
-                            self._pending_titles.discard(entry["title"])
-                            metrics.get_trend_data.inc()
+                            self.trend_dict[title] = entry["parsed_time"]
+                        metrics.get_trend_data.inc()
                         self.logger.info(
-                            f"Trend Found: {entry['title']}", extra={"trend": entry}
+                            f"Trend Found: {title}", extra={"trend": entry}
                         )
                     except Exception:
-                        with self._trend_lock:
-                            self._pending_titles.discard(entry["title"])
                         had_delivery_failure = True
                         self.logger.error(
                             "Trend alert delivery failed",
                             exc_info=True,
                             extra={"trend": entry},
                         )
+                    finally:
+                        with self._trend_lock:
+                            self._pending_titles.discard(title)
 
                 if had_delivery_failure:
                     metrics.inc_error("job_execution_error")
@@ -138,15 +133,12 @@ class RSSBot:
 
     def start(self):
         with self._state_lock:
-            self._sync_runtime_state()
-            if self._is_worker_alive():
+            if self.thread is not None and self.thread.is_alive():
                 self.logger.info("Bot is already running")
                 return False
 
-            self._stop_event = Event()
-            self._scheduler = schedule.Scheduler()
+            self._stop_event.clear()
             self._register_jobs()
-            self.is_running = True
             self.thread = Thread(target=self.run, daemon=True)
             self.thread.start()
             self.logger.info("Bot started")
@@ -154,14 +146,12 @@ class RSSBot:
 
     def stop(self):
         with self._state_lock:
-            self._sync_runtime_state()
             thread = self.thread
-            if not thread:
-                self.is_running = False
+            if thread is None or not thread.is_alive():
+                self.thread = None
                 self.logger.info("Bot is not running")
                 return True
 
-            self.is_running = False
             self._stop_event.set()
 
         thread.join(timeout=self.stop_timeout)
@@ -173,6 +163,5 @@ class RSSBot:
             if stopped:
                 self.logger.info("Bot stopped")
             else:
-                self.is_running = True
                 self.logger.warning("Bot stop timed out")
         return stopped
