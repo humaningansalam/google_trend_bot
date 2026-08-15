@@ -17,7 +17,7 @@ On Linux hosts that do not already have Chromium system libraries, run `uv run p
 ## Environment variables
 
 - `SLACK_WEBHOOK`: Slack incoming webhook URL.
-- `VERSION`: Container image tag used by Compose, default `0.3.4` in `.env.example`.
+- `VERSION`: Container image tag used by Compose, default `0.3.5` in `.env.example`.
 - `LOKI_URL`: Optional Loki push endpoint used by logging. Leave it empty to disable Loki output.
 - `SCHEDULE_INTERVAL`: RSS polling interval in minutes. Must be a positive integer.
 - `CONTROL_TOKEN`: Optional bearer token for `/start`, `/stop`, and `/reset`. When unset, those endpoints keep their current local behavior.
@@ -50,7 +50,8 @@ On Linux hosts that do not already have Chromium system libraries, run `uv run p
 
 ## Endpoints
 
-- `GET /health` returns `Healthy`.
+- `GET /health` returns `Healthy` and includes `X-Bot-Active: true|false` so
+  operators can distinguish HTTP process liveness from the RSS worker state.
 - `POST /start` returns `{"status":"success","state":"running"}` after starting the RSS bot.
 - `POST /stop` returns a success response with `state` set to `stopped` or `stopping`.
 - `POST /reset` clears old trend memory and returns `{"status":"success"}`.

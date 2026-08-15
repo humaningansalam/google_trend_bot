@@ -125,7 +125,6 @@ def test_start_bot_recovers_once_old_worker_exits_after_timeout(client):
 
     if old_thread is not None:
         client.application.bot.thread = None
-        client.application.bot.is_running = False
 
     start_response = client.post("/start")
 

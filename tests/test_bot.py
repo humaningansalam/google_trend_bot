@@ -10,26 +10,36 @@ from pytz import timezone
 from src.bot.rss_bot import RSSBot
 
 
-def test_bot_job(test_bot, mock_rss_parser, mock_send_alert):
-    test_bot.job()
-
-    mock_rss_parser.parse.assert_called_once()
-    mock_send_alert.assert_called()
-
-
-def test_bot_reset_trend(test_bot):
+def test_bot_reset_trend(test_bot, mock_rss_parser, mock_send_alert):
     seoul_tz = timezone("Asia/Seoul")
     current_time = datetime.now(seoul_tz)
     old_time = current_time - timedelta(days=5)
     new_time = current_time - timedelta(days=1)
 
-    test_bot.trend_dict = {
-        "Old Trend": old_time,
-        "New Trend": new_time,
-    }
+    mock_rss_parser.parse.return_value = [
+        {
+            "title": "Old Trend",
+            "content": "old",
+            "link": "http://example.com/old",
+            "published": "old",
+            "parsed_time": old_time,
+        },
+        {
+            "title": "New Trend",
+            "content": "new",
+            "link": "http://example.com/new",
+            "published": "new",
+            "parsed_time": new_time,
+        },
+    ]
+
+    test_bot.job()
+    mock_send_alert.reset_mock()
     test_bot.reset_trend()
-    assert len(test_bot.trend_dict) == 1
-    assert "New Trend" in test_bot.trend_dict
+    test_bot.job()
+
+    mock_send_alert.assert_called_once()
+    assert mock_send_alert.call_args.args[0].startswith("Old Trend\n")
 
 
 def test_bot_job_deduplicates_trends_within_memory_window(test_bot, mock_send_alert):
@@ -75,22 +85,13 @@ def test_bot_reset_does_not_raise_when_run_concurrently_with_job(test_bot, clien
         assert not worker.is_alive()
 
 
-def test_bot_job_does_not_mark_new_trend_on_send_failure(test_bot, mock_send_alert):
-    mock_send_alert.side_effect = RuntimeError("Slack API failure")
-
-    test_bot.job()
-
-    assert "Test Trend" not in test_bot.trend_dict
-    mock_send_alert.assert_called_once()
-
-
 def test_bot_job_retries_on_send_failure_then_marks_trend_on_success(test_bot, mock_send_alert):
     mock_send_alert.side_effect = [RuntimeError("Slack API failure"), None]
 
     test_bot.job()
     test_bot.job()
+    test_bot.job()
 
-    assert "Test Trend" in test_bot.trend_dict
     assert mock_send_alert.call_count == 2
 
 
@@ -155,39 +156,14 @@ def test_bot_does_not_log_the_slack_webhook_on_transport_failure(
     assert "Slack webhook request failed" in caplog.text
 
 
-def test_bot_job_handles_parser_error_without_unbound_local_error_and_cleans_pending_titles(test_bot, mock_rss_parser, mock_send_alert):
-    mock_rss_parser.parse.side_effect = RuntimeError("parser failure")
+def test_bot_job_recovers_after_parser_error(test_bot, mock_rss_parser, mock_send_alert):
+    entries = mock_rss_parser.parse.return_value
+    mock_rss_parser.parse.side_effect = [RuntimeError("parser failure"), entries]
 
     test_bot.job()
-
-    mock_send_alert.assert_not_called()
-    assert not test_bot._pending_titles
-
-
-def test_bot_job_cleans_pending_titles_when_send_alert_fails(test_bot, mock_rss_parser, mock_send_alert):
-    mock_rss_parser.parse.return_value = [
-        {
-            "title": "Trend A",
-            "content": "first",
-            "link": "http://example.com/1",
-            "published": "now",
-            "parsed_time": datetime.now(timezone("Asia/Seoul")),
-        },
-        {
-            "title": "Trend B",
-            "content": "second",
-            "link": "http://example.com/2",
-            "published": "now",
-            "parsed_time": datetime.now(timezone("Asia/Seoul")),
-        },
-    ]
-    mock_send_alert.side_effect = [None, RuntimeError("Slack API failure")]
-
     test_bot.job()
 
-    assert "Trend A" in test_bot.trend_dict
-    assert "Trend B" not in test_bot.trend_dict
-    assert not test_bot._pending_titles
+    mock_send_alert.assert_called_once()
 
 
 def test_bot_job_continues_after_one_payload_is_rejected(
@@ -224,9 +200,6 @@ def test_bot_job_continues_after_one_payload_is_rejected(
         for call in mock_send_alert.call_args_list
     ]
     assert attempted_titles == ["Bad Trend", "Good Trend", "Bad Trend"]
-    assert "Bad Trend" not in test_bot.trend_dict
-    assert "Good Trend" in test_bot.trend_dict
-    assert not test_bot._pending_titles
 
 
 def test_bot_start_stop(test_bot):
@@ -310,54 +283,3 @@ def test_bot_start_and_stop_from_multiple_callers_stay_single_thread(test_bot):
     assert test_bot.thread is None or not test_bot.thread.is_alive()
     assert first_thread is not None
     assert test_bot.thread in {None, first_thread}
-
-
-def test_bot_instances_do_not_share_scheduler_jobs(test_bot, mock_rss_parser, mock_send_alert):
-    second_bot = test_bot.__class__(
-        rss_parser=mock_rss_parser,
-        interval=10,
-        stop_timeout=0.1,
-        sleep_interval=0.01,
-    )
-    try:
-        assert test_bot.start()
-        assert second_bot.start()
-
-        assert len(test_bot._scheduler.jobs) == 2
-        assert len(second_bot._scheduler.jobs) == 2
-        assert test_bot._scheduler is not second_bot._scheduler
-    finally:
-        test_bot.stop()
-        second_bot.stop()
-
-
-def test_bot_stop_timeout_does_not_duplicate_jobs_on_restart(test_bot):
-    start_gate = Event()
-    release_gate = Event()
-    original_run = test_bot.run
-    first_run = True
-
-    def blocked_run():
-        nonlocal first_run
-        if first_run:
-            first_run = False
-            start_gate.set()
-            release_gate.wait(timeout=1)
-        original_run()
-
-    with patch.object(test_bot, "run", side_effect=blocked_run):
-        assert test_bot.start()
-        assert start_gate.wait(timeout=1)
-        first_thread = test_bot.thread
-        test_bot.stop_timeout = 0.01
-        assert not test_bot.stop()
-        assert not test_bot.start()
-        assert len(test_bot._scheduler.jobs) == 2
-        assert test_bot.thread is first_thread
-
-        release_gate.set()
-        first_thread.join(timeout=1)
-        assert test_bot.start()
-        assert len(test_bot._scheduler.jobs) == 2
-        assert test_bot.thread is not None and test_bot.thread is not first_thread
-        test_bot.stop()

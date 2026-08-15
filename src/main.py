@@ -137,7 +137,11 @@ def create_app(bot=None, scraper=None):
 
     @app.route("/health")
     def health():
-        return "Healthy"
+        response = app.make_response("Healthy")
+        response.headers["X-Bot-Active"] = (
+            "true" if app.bot is not None and app.bot.is_active() else "false"
+        )
+        return response
 
     return app
 
