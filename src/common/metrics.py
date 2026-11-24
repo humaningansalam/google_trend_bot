@@ -6,16 +6,19 @@ class BotMetrics(BaseMetrics):
     def __init__(self) -> None:
         super().__init__(app_name="trends_bot")
         self.rss_poll_duration = Summary(
-            "request_processing_seconds",
+            "rss_poll_duration_seconds",
             "Time spent polling and processing the Google Trends RSS feed",
+            namespace="trends_bot",
         )
         self.completed_rss_polls = Counter(
-            "completed_jobs_total",
+            "completed_rss_polls_total",
             "Number of RSS polls completed without a delivery failure",
+            namespace="trends_bot",
         )
         self.delivered_alerts = Counter(
-            "get_trend_data_total",
+            "delivered_alerts_total",
             "Number of Google Trends alerts delivered to Slack",
+            namespace="trends_bot",
         )
 
 

@@ -56,7 +56,7 @@ def test_second_start_returns_a_stable_error(client):
     }
 
 
-@pytest.mark.parametrize("path", ["/start", "/stop", "/reset"])
+@pytest.mark.parametrize("path", ["/start", "/stop", "/trends/prune"])
 @pytest.mark.parametrize("authorization", [None, "Bearer wrong-token"])
 def test_control_endpoints_reject_missing_or_wrong_tokens(
     path: str,
@@ -81,7 +81,7 @@ def test_control_endpoints_reject_missing_or_wrong_tokens(
     }
 
 
-@pytest.mark.parametrize("path", ["/start", "/stop", "/reset"])
+@pytest.mark.parametrize("path", ["/start", "/stop", "/trends/prune"])
 def test_control_endpoints_accept_the_configured_token(
     path: str,
     trend_bot: TrendAlertBot,
@@ -242,7 +242,7 @@ def test_routing_errors_use_the_json_error_contract(client, path: str):
     }
 
 
-@pytest.mark.parametrize("path", ["/start", "/stop", "/reset"])
+@pytest.mark.parametrize("path", ["/start", "/stop", "/trends/prune"])
 def test_uninitialized_control_endpoints_use_the_json_error_contract(path: str):
     response = create_app().test_client().post(path)
 

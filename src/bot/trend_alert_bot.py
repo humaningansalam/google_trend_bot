@@ -76,7 +76,7 @@ class TrendAlertBot:
                 reserved_entries = self._reserve_unseen_entries(entries)
             except Exception:
                 self._logger.exception("Google Trends RSS poll failed")
-                metrics.inc_error("job_execution_error")
+                metrics.inc_error("rss_poll_error")
                 return
 
             delivery_failed = False
@@ -102,7 +102,7 @@ class TrendAlertBot:
                     self._finish_delivery(entry, delivered=delivered)
 
             if delivery_failed:
-                metrics.inc_error("job_execution_error")
+                metrics.inc_error("alert_delivery_error")
             else:
                 metrics.completed_rss_polls.inc()
 

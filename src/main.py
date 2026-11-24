@@ -60,9 +60,9 @@ def _register_routes(app: Flask) -> None:
         "/stop", endpoint="stop_bot", view_func=_stop_bot, methods=["POST"]
     )
     app.add_url_rule(
-        "/reset",
-        endpoint="reset_trend_memory",
-        view_func=_reset_trend_memory,
+        "/trends/prune",
+        endpoint="prune_trend_memory",
+        view_func=_prune_trend_memory,
         methods=["POST"],
     )
     app.add_url_rule(
@@ -168,7 +168,7 @@ def _stop_bot() -> ApiResponse:
     return success_response(state=state.value)
 
 
-def _reset_trend_memory() -> ApiResponse:
+def _prune_trend_memory() -> ApiResponse:
     unauthorized_response = _authorize_control_request()
     if unauthorized_response is not None:
         return unauthorized_response

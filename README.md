@@ -36,7 +36,7 @@ The development server binds to `127.0.0.1:5000` by default. `uv run` does not l
 | `SCHEDULE_INTERVAL` | no | `10` | RSS poll interval in minutes; must be a positive integer. |
 | `SCRAPER_BACKEND` | no | `local` | `local` runs Chromium in this service; `remote` uses the Playwright job API. |
 | `PLAYWRIGHT_URL` | remote only | `http://localhost:3000` | Absolute base URL for the remote Playwright job API. |
-| `CONTROL_TOKEN` | no | none | Bearer token for `/start`, `/stop`, and `/reset`. Without it, protect those routes at the network layer. |
+| `CONTROL_TOKEN` | no | none | Bearer token for `/start`, `/stop`, and `/trends/prune`. Without it, protect those routes at the network layer. |
 | `LOKI_URL` | no | none | Loki push endpoint. Empty disables Loki output. |
 | `LOG_LEVEL` | no | `INFO` | Python log level. |
 | `LOG_FILE` | no | `./logs/bot.log` | Local log file path. |
@@ -44,9 +44,7 @@ The development server binds to `127.0.0.1:5000` by default. `uv run` does not l
 | `APP_ENV` | no | `dev` | Environment label used in logs. |
 | `BIND_HOST` | no | `127.0.0.1` | Host used by the development server. |
 | `PORT` | no | `5000` | TCP port used by the development server; must be between 1 and 65535. |
-| `VERSION` | Compose only | `0.4.0` in `.env.example` | Container image tag. |
-
-`USE_SERVER` was removed in version 0.4. Use `SCRAPER_BACKEND=local` or `SCRAPER_BACKEND=remote`.
+| `VERSION` | Compose only | `dev` when unset | Container image tag; set it to the project release version. |
 
 ## Verification
 
@@ -56,6 +54,7 @@ Run the same checks enforced by CI:
 uv sync --frozen --group dev
 uv run ruff check .
 uv run ruff format --check .
+uv run pip-audit --local --progress-spinner off
 uv run pytest -q
 uv run python -m compileall -q src tests
 ```
@@ -75,17 +74,28 @@ uv run ruff format .
 | `GET` | `/health` | Returns `Healthy`; `X-Bot-Active` reports the scheduler thread state. |
 | `POST` | `/start` | Starts the scheduler or returns `bot_already_running`. |
 | `POST` | `/stop` | Returns `stopped` or `stopping` when the bounded join times out. |
-| `POST` | `/reset` | Prunes titles older than the three-day memory window. |
-| `GET` | `/trends` | Returns the canonical scrape result. Upstream failures use stable error codes. |
+| `POST` | `/trends/prune` | Prunes titles older than the three-day memory window. |
+| `GET` | `/trends` | Returns data from the selected scraper. Upstream failures include an error code. |
 | `GET` | `/metrics` | Exposes Prometheus metrics. |
 
-When `CONTROL_TOKEN` is set, send `Authorization: Bearer <token>` to the three state-changing endpoints. Read-only endpoints remain open. Clients should branch on JSON `code`, not the human-readable `message`. Prometheus retains the existing `request_processing_seconds`, `completed_jobs_total`, and `get_trend_data_total` metric names for dashboard compatibility.
+When `CONTROL_TOKEN` is set, send `Authorization: Bearer <token>` to the three state-changing endpoints. Read-only endpoints remain open. Clients should branch on JSON `code`, not the human-readable `message`.
+
+### Prometheus metrics
+
+| Metric | Measures |
+| --- | --- |
+| `trends_bot_rss_poll_duration_seconds` | Time spent polling and processing the RSS feed. |
+| `trends_bot_completed_rss_polls_total` | RSS polls completed without a delivery failure. |
+| `trends_bot_delivered_alerts_total` | Trend alerts delivered to Slack. |
+
+Error labels distinguish `rss_poll_error` from `alert_delivery_error`.
 
 ## Docker Compose
 
 ```bash
 cp .env.example .env
-# Set SLACK_WEBHOOK and VERSION in .env.
+# Set SLACK_WEBHOOK in .env.
+export VERSION=0.5.0
 
 docker network inspect bridge_server >/dev/null 2>&1 \
   || docker network create bridge_server

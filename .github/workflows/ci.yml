@@ -119,8 +119,9 @@ jobs:
           PYTHON
 
           metrics="$(curl --fail --silent http://127.0.0.1:5000/metrics)"
-          grep -q 'request_processing_seconds' <<<"$metrics"
-          grep -q 'get_trend_data_total' <<<"$metrics"
+          grep -q 'trends_bot_rss_poll_duration_seconds' <<<"$metrics"
+          grep -q 'trends_bot_completed_rss_polls_total' <<<"$metrics"
+          grep -q 'trends_bot_delivered_alerts_total' <<<"$metrics"
 
       - name: Show container logs on failure
         if: failure()
@@ -144,10 +145,10 @@ jobs:
       LOG_FILE: ${{ vars.LOG_FILE || './logs/bot.log' }}
       SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
       LOKI_URL: ${{ secrets.LOKI_URL }}
-      SCRAPER_BACKEND: ${{ vars.SCRAPER_BACKEND || (vars.USE_SERVER == 'True' && 'remote' || 'local') }}
+      SCRAPER_BACKEND: ${{ vars.SCRAPER_BACKEND || 'local' }}
       SCHEDULE_INTERVAL: ${{ vars.SCHEDULE_INTERVAL || '10' }}
       CONTROL_TOKEN: ${{ secrets.CONTROL_TOKEN }}
-      PLAYWRIGHT_URL: ${{ secrets.PLAYWRIGHT_URL || vars.PLAYWRIGHT_URL || 'http://localhost:3000' }}
+      PLAYWRIGHT_URL: ${{ secrets.PLAYWRIGHT_URL || 'http://localhost:3000' }}
       BIND_HOST: 127.0.0.1
       PORT: "5000"
     steps:
