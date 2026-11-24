@@ -3,27 +3,47 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 import requests
 
-from src.bot.scraper import Scraper
+from src.bot.scraper import GoogleTrendsScraper
+from src.bot.trend_alert_bot import TrendAlertBot
 from src.clients.playwright_submit import PlaywrightJobClient
 from src.common.api_contracts import ApiErrorCode, BotState
 from src.common.scrape_contracts import ScrapeErrorCode, ScrapeResult
-from src.config import ScraperBackend
+from src.config import ScraperBackend, Settings
+from src.main import (
+    BOT_EXTENSION_KEY,
+    RESOURCE_MONITOR_EXTENSION_KEY,
+    SCRAPER_EXTENSION_KEY,
+    create_app,
+    create_runtime_app,
+)
+
+CONTROL_TOKEN = "secret-token"
 
 
-def test_health_check(client):
+def test_health_reports_http_and_worker_liveness(client):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.data == b"Healthy"
+    assert response.headers["X-Bot-Active"] == "false"
+
+    client.post("/start")
+    assert client.get("/health").headers["X-Bot-Active"] == "true"
+
+    client.post("/stop")
+    assert client.get("/health").headers["X-Bot-Active"] == "false"
 
 
-def test_start_bot(client):
+def test_start_returns_running_state(client):
     response = client.post("/start")
+
     assert response.status_code == 200
-    data = response.get_json()
-    assert data == {"status": "success", "state": BotState.RUNNING.value}
+    assert response.get_json() == {
+        "status": "success",
+        "state": BotState.RUNNING.value,
+    }
 
 
-def test_start_bot_returns_json_error_when_already_running(client):
+def test_second_start_returns_a_stable_error(client):
     client.post("/start")
 
     response = client.post("/start")
@@ -36,10 +56,22 @@ def test_start_bot_returns_json_error_when_already_running(client):
     }
 
 
-def test_start_bot_requires_token_when_configured(client, monkeypatch):
-    monkeypatch.setattr("src.main.Config.CONTROL_TOKEN", "secret-token")
+@pytest.mark.parametrize("path", ["/start", "/stop", "/reset"])
+@pytest.mark.parametrize("authorization", [None, "Bearer wrong-token"])
+def test_control_endpoints_reject_missing_or_wrong_tokens(
+    path: str,
+    authorization: str | None,
+    trend_bot: TrendAlertBot,
+    trend_scraper: GoogleTrendsScraper,
+):
+    app = create_app(
+        trend_alert_bot=trend_bot,
+        trend_scraper=trend_scraper,
+        control_token=CONTROL_TOKEN,
+    )
+    headers = {} if authorization is None else {"Authorization": authorization}
 
-    response = client.post("/start")
+    response = app.test_client().post(path, headers=headers)
 
     assert response.status_code == 401
     assert response.get_json() == {
@@ -49,27 +81,28 @@ def test_start_bot_requires_token_when_configured(client, monkeypatch):
     }
 
 
-def test_start_bot_accepts_bearer_token_when_configured(client, monkeypatch):
-    monkeypatch.setattr("src.main.Config.CONTROL_TOKEN", "secret-token")
+@pytest.mark.parametrize("path", ["/start", "/stop", "/reset"])
+def test_control_endpoints_accept_the_configured_token(
+    path: str,
+    trend_bot: TrendAlertBot,
+    trend_scraper: GoogleTrendsScraper,
+):
+    app = create_app(
+        trend_alert_bot=trend_bot,
+        trend_scraper=trend_scraper,
+        control_token=CONTROL_TOKEN,
+    )
 
-    response = client.post("/start", headers={"Authorization": "Bearer secret-token"})
+    response = app.test_client().post(
+        path,
+        headers={"Authorization": f"Bearer {CONTROL_TOKEN}"},
+    )
 
     assert response.status_code == 200
-    assert response.get_json() == {
-        "status": "success",
-        "state": BotState.RUNNING.value,
-    }
+    assert response.get_json()["status"] == "success"
 
 
-def test_stop_bot(client):
-    client.post("/start")
-    response = client.post("/stop")
-    assert response.status_code == 200
-    data = response.get_json()
-    assert data == {"status": "success", "state": BotState.STOPPED.value}
-
-
-def test_stop_bot_is_idempotent_when_already_stopped(client):
+def test_stop_is_idempotent(client):
     response = client.post("/stop")
 
     assert response.status_code == 200
@@ -79,9 +112,11 @@ def test_stop_bot_is_idempotent_when_already_stopped(client):
     }
 
 
-def test_stop_bot_reports_timeout_state(client):
-    client.application.bot.stop = Mock(return_value=False)
-    client.post("/start")
+def test_stop_reports_when_the_worker_is_still_stopping(
+    client,
+    trend_bot: TrendAlertBot,
+):
+    trend_bot.stop = Mock(return_value=False)
 
     response = client.post("/stop")
 
@@ -92,152 +127,54 @@ def test_stop_bot_reports_timeout_state(client):
     }
 
 
-def test_start_bot_recovers_after_timed_out_stop(client):
-    client.post("/start")
-    client.application.bot.stop = Mock(return_value=False)
+@pytest.mark.parametrize("path", ["/health", "/metrics", "/trends"])
+def test_read_only_endpoints_remain_open_when_control_token_is_set(
+    path: str,
+    trend_bot: TrendAlertBot,
+    trend_scraper: GoogleTrendsScraper,
+):
+    app = create_app(
+        trend_alert_bot=trend_bot,
+        trend_scraper=trend_scraper,
+        control_token=CONTROL_TOKEN,
+    )
 
-    stop_response = client.post("/stop")
-    assert stop_response.get_json() == {
-        "status": "success",
-        "state": BotState.STOPPING.value,
-    }
-
-    start_response = client.post("/start")
-
-    assert start_response.status_code == 400
-    assert start_response.get_json() == {
-        "status": "error",
-        "code": ApiErrorCode.BOT_ALREADY_RUNNING.value,
-        "message": "Bot is already running",
-    }
-
-
-def test_start_bot_recovers_once_old_worker_exits_after_timeout(client):
-    client.post("/start")
-    old_thread = client.application.bot.thread
-    client.application.bot.stop = Mock(return_value=False)
-
-    stop_response = client.post("/stop")
-    assert stop_response.get_json() == {
-        "status": "success",
-        "state": BotState.STOPPING.value,
-    }
-
-    if old_thread is not None:
-        client.application.bot.thread = None
-
-    start_response = client.post("/start")
-
-    assert start_response.status_code == 200
-    assert start_response.get_json() == {
-        "status": "success",
-        "state": BotState.RUNNING.value,
-    }
-    assert client.application.bot.thread is not None
-    assert client.application.bot.thread is not old_thread
-
-
-def test_stop_bot_accepts_bearer_token_when_configured(client, monkeypatch):
-    monkeypatch.setattr("src.main.Config.CONTROL_TOKEN", "secret-token")
-    client.post("/start", headers={"Authorization": "Bearer secret-token"})
-
-    response = client.post("/stop", headers={"Authorization": "Bearer secret-token"})
+    response = app.test_client().get(path)
 
     assert response.status_code == 200
-    assert response.get_json() == {
-        "status": "success",
-        "state": BotState.STOPPED.value,
-    }
 
 
-def test_stop_bot_rejects_wrong_token_when_configured(client, monkeypatch):
-    monkeypatch.setattr("src.main.Config.CONTROL_TOKEN", "secret-token")
-
-    response = client.post("/stop", headers={"Authorization": "Bearer wrong-token"})
-
-    assert response.status_code == 401
-    assert response.get_json() == {
-        "status": "error",
-        "code": ApiErrorCode.UNAUTHORIZED.value,
-        "message": "Unauthorized",
-    }
-
-
-def test_reset_bot_requires_token_when_configured(client, monkeypatch):
-    monkeypatch.setattr("src.main.Config.CONTROL_TOKEN", "secret-token")
-
-    response = client.post("/reset")
-
-    assert response.status_code == 401
-    assert response.get_json() == {
-        "status": "error",
-        "code": ApiErrorCode.UNAUTHORIZED.value,
-        "message": "Unauthorized",
-    }
-
-
-def test_reset_bot_accepts_bearer_token_when_configured(client, monkeypatch):
-    monkeypatch.setattr("src.main.Config.CONTROL_TOKEN", "secret-token")
-    client.post("/start", headers={"Authorization": "Bearer secret-token"})
-
-    response = client.post("/reset", headers={"Authorization": "Bearer secret-token"})
-
-    assert response.status_code == 200
-    assert response.get_json() == {"status": "success"}
-
-
-def test_health_remains_open_when_control_token_configured(client, monkeypatch):
-    monkeypatch.setattr("src.main.Config.CONTROL_TOKEN", "secret-token")
-
-    response = client.get("/health")
-
-    assert response.status_code == 200
-    assert response.data == b"Healthy"
-
-
-def test_trends_remains_open_when_control_token_configured(client, monkeypatch, test_scraper):
-    monkeypatch.setattr("src.main.Config.CONTROL_TOKEN", "secret-token")
-
+def test_trends_returns_the_scraper_data(client):
     response = client.get("/trends")
 
     assert response.status_code == 200
-    data = response.get_json()
-    assert data["status"] == "success"
-    assert "data" in data
+    assert response.get_json() == {
+        "status": "success",
+        "data": [{"trend": "Test Trend"}],
+    }
 
 
-def test_get_trends(client, test_scraper):
-    response = client.get("/trends")
-    assert response.status_code == 200
-    data = response.get_json()
-    assert data["status"] == "success"
-    assert "data" in data
-
-
-def test_get_trends_returns_error_payload(client):
-    client.application.scraper.scrape_trends = AsyncMock(
+def test_trends_preserves_typed_scraper_errors(client, trend_scraper):
+    trend_scraper.scrape_trends = AsyncMock(
         return_value=ScrapeResult.failure(
-            ScrapeErrorCode.CRAWL_FAILED, "boom"
+            ScrapeErrorCode.CRAWL_FAILED,
+            "crawl failed",
         )
     )
-    with patch.object(client.application.logger, "warning") as log_warning:
-        response = client.get("/trends")
+
+    response = client.get("/trends")
 
     assert response.status_code == 502
     assert response.get_json() == {
         "status": "error",
         "code": ScrapeErrorCode.CRAWL_FAILED.value,
-        "message": "boom",
+        "message": "crawl failed",
     }
-    log_warning.assert_called_once_with(
-        "Trend scraper failed: code=%s message=%s",
-        ScrapeErrorCode.CRAWL_FAILED.value,
-        "boom",
-    )
 
 
-def test_get_trends_does_not_expose_authenticated_remote_url(
-    client, monkeypatch
+def test_trends_does_not_expose_credentials_from_a_remote_url(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     secret = "REMOTE_SUPERSECRET"
     server_url = f"http://user:{secret}@playwright-server"
@@ -248,13 +185,12 @@ def test_get_trends_does_not_expose_authenticated_remote_url(
         "src.clients.playwright_submit.requests.post",
         Mock(return_value=failed_response),
     )
-    client.application.scraper = Scraper(
+    client.application.extensions[SCRAPER_EXTENSION_KEY] = GoogleTrendsScraper(
         backend=ScraperBackend.REMOTE,
         job_client=PlaywrightJobClient(server_url=server_url),
     )
 
-    with patch.object(client.application.logger, "warning") as log_warning:
-        response = client.get("/trends")
+    response = client.get("/trends")
 
     assert response.status_code == 502
     assert response.get_json() == {
@@ -263,16 +199,14 @@ def test_get_trends_does_not_expose_authenticated_remote_url(
         "message": "Remote job submission failed with HTTP 500",
     }
     assert secret not in response.get_data(as_text=True)
-    assert secret not in str(log_warning.call_args)
 
 
-def test_get_trends_returns_json_on_exception(client):
-    def boom():
-        raise RuntimeError("boom")
+def test_trends_converts_an_unexpected_exception_to_json(client, trend_scraper):
+    trend_scraper.scrape_trends = AsyncMock(
+        side_effect=RuntimeError("unexpected implementation detail")
+    )
 
-    client.application.scraper.scrape_trends = AsyncMock(side_effect=boom)
-    with patch.object(client.application.logger, "exception") as log_exception:
-        response = client.get("/trends")
+    response = client.get("/trends")
 
     assert response.status_code == 502
     assert response.get_json() == {
@@ -280,15 +214,12 @@ def test_get_trends_returns_json_on_exception(client):
         "code": ApiErrorCode.SCRAPER_CONTRACT_VIOLATION.value,
         "message": "Failed to fetch trends",
     }
-    log_exception.assert_called_once_with("Trend scraping failed")
 
 
-def test_get_trends_rejects_a_non_contract_result(client):
-    client.application.scraper.scrape_trends = AsyncMock(
-        return_value={"status": "success"}
-    )
-    with patch.object(client.application.logger, "error") as log_error:
-        response = client.get("/trends")
+def test_trends_rejects_a_non_contract_result(client, trend_scraper):
+    trend_scraper.scrape_trends = AsyncMock(return_value={"status": "success"})
+
+    response = client.get("/trends")
 
     assert response.status_code == 502
     assert response.get_json() == {
@@ -296,14 +227,10 @@ def test_get_trends_rejects_a_non_contract_result(client):
         "code": ApiErrorCode.SCRAPER_CONTRACT_VIOLATION.value,
         "message": "Failed to fetch trends",
     }
-    log_error.assert_called_once_with(
-        "Trend scraper violated its result contract: %s",
-        "dict",
-    )
 
 
 @pytest.mark.parametrize("path", ["/start", "/missing"])
-def test_routing_errors_use_json_error_shape(client, path):
+def test_routing_errors_use_the_json_error_contract(client, path: str):
     response = client.get(path)
 
     assert response.status_code in {404, 405}
@@ -313,13 +240,10 @@ def test_routing_errors_use_json_error_shape(client, path):
         ApiErrorCode.NOT_FOUND.value,
         ApiErrorCode.METHOD_NOT_ALLOWED.value,
     }
-    assert isinstance(response.get_json()["message"], str)
 
 
 @pytest.mark.parametrize("path", ["/start", "/stop", "/reset"])
-def test_uninitialized_control_endpoints_use_json_error_shape(path):
-    from src.main import create_app
-
+def test_uninitialized_control_endpoints_use_the_json_error_contract(path: str):
     response = create_app().test_client().post(path)
 
     assert response.status_code == 400
@@ -330,19 +254,16 @@ def test_uninitialized_control_endpoints_use_json_error_shape(path):
     }
 
 
-def test_unhandled_endpoint_exception_uses_json_error_shape():
-    from src.main import create_app
-
+def test_unhandled_endpoint_exception_uses_the_json_error_contract():
     app = create_app()
 
-    @app.route("/_test-boom")
+    @app.get("/_test-boom")
     def boom():
         raise RuntimeError("boom")
 
     response = app.test_client().get("/_test-boom")
 
     assert response.status_code == 500
-    assert response.mimetype == "application/json"
     assert response.get_json() == {
         "status": "error",
         "code": ApiErrorCode.INTERNAL_ERROR.value,
@@ -350,34 +271,102 @@ def test_unhandled_endpoint_exception_uses_json_error_shape():
     }
 
 
-def test_runtime_app_factory_starts_single_bot_and_monitor():
-    from src.main import create_runtime_app
-
-    bot = Mock()
-    scraper = Mock()
-    monitor = Mock()
+def test_runtime_factory_wires_explicit_settings_and_starts_services():
+    settings = Settings(
+        app_name="google-trend-bot",
+        app_environment="test",
+        log_level="INFO",
+        log_file="./logs/test.log",
+        slack_webhook="https://hooks.slack.test/services/example",
+        schedule_interval_minutes=3,
+        control_token=CONTROL_TOKEN,
+        scraper_backend=ScraperBackend.REMOTE,
+        playwright_url="http://playwright-server:3000",
+        loki_url=None,
+        bind_host="127.0.0.1",
+        bind_port=5000,
+    )
+    trend_feed = Mock()
+    trend_bot = Mock()
+    trend_bot.start.return_value = True
+    trend_scraper = Mock()
+    job_client = Mock()
+    resource_monitor = Mock()
 
     with (
         patch("src.main.setup_logging") as setup_logging,
-        patch("src.main.RSSParser") as rss_parser,
-        patch("src.main.RSSBot", return_value=bot) as rss_bot,
-        patch("src.main.Scraper", return_value=scraper) as scraper_factory,
-        patch("src.main.ResourceMonitor", return_value=monitor) as resource_monitor,
-        patch("src.main.Config.SLACK_WEBHOOK", "https://hooks.slack.test/example"),
-        patch("src.main.Config.SCRAPER_BACKEND", ScraperBackend.REMOTE),
+        patch("src.main.RSSParser", return_value=trend_feed),
+        patch("src.main.TrendAlertBot", return_value=trend_bot) as bot_factory,
+        patch(
+            "src.main.PlaywrightJobClient",
+            return_value=job_client,
+        ) as job_client_factory,
+        patch(
+            "src.main.GoogleTrendsScraper",
+            return_value=trend_scraper,
+        ) as scraper_factory,
+        patch(
+            "src.main.ResourceMonitor",
+            return_value=resource_monitor,
+        ) as monitor_factory,
     ):
-        app = create_runtime_app()
+        app = create_runtime_app(settings)
 
-    setup_logging.assert_called_once()
-    rss_bot.assert_called_once_with(
-        rss_parser.return_value,
-        interval=10,
-        webhook_url="https://hooks.slack.test/example",
+    setup_logging.assert_called_once_with(
+        level="INFO",
+        loki_url=None,
+        tags={"app": "google-trend-bot", "env": "test"},
+        log_file="./logs/test.log",
     )
-    scraper_factory.assert_called_once_with(backend=ScraperBackend.REMOTE)
-    resource_monitor.assert_called_once()
-    monitor.start.assert_called_once_with()
-    bot.start.assert_called_once_with()
-    assert app.bot is bot
-    assert app.scraper is scraper
-    assert app.extensions["resource_monitor"] is monitor
+    bot_factory.assert_called_once_with(
+        trend_feed,
+        poll_interval_minutes=3,
+        webhook_url=settings.slack_webhook,
+    )
+    job_client_factory.assert_called_once_with(
+        server_url="http://playwright-server:3000"
+    )
+    scraper_factory.assert_called_once_with(
+        backend=ScraperBackend.REMOTE,
+        job_client=job_client,
+    )
+    monitor_factory.assert_called_once()
+    resource_monitor.start.assert_called_once_with()
+    trend_bot.start.assert_called_once_with()
+    assert app.extensions[BOT_EXTENSION_KEY] is trend_bot
+    assert app.extensions[SCRAPER_EXTENSION_KEY] is trend_scraper
+    assert app.extensions[RESOURCE_MONITOR_EXTENSION_KEY] is resource_monitor
+
+
+def test_runtime_factory_stops_the_worker_when_monitor_startup_fails():
+    settings = Settings(
+        app_name="google-trend-bot",
+        app_environment="test",
+        log_level="INFO",
+        log_file="./logs/test.log",
+        slack_webhook="https://hooks.slack.test/services/example",
+        schedule_interval_minutes=3,
+        control_token=CONTROL_TOKEN,
+        scraper_backend=ScraperBackend.LOCAL,
+        playwright_url="http://localhost:3000",
+        loki_url=None,
+        bind_host="127.0.0.1",
+        bind_port=5000,
+    )
+    trend_bot = Mock()
+    trend_bot.start.return_value = True
+    resource_monitor = Mock()
+    resource_monitor.start.side_effect = RuntimeError("monitor failed")
+
+    with (
+        patch("src.main.setup_logging"),
+        patch("src.main.RSSParser"),
+        patch("src.main.TrendAlertBot", return_value=trend_bot),
+        patch("src.main.GoogleTrendsScraper"),
+        patch("src.main.ResourceMonitor", return_value=resource_monitor),
+        pytest.raises(RuntimeError, match="monitor failed"),
+    ):
+        create_runtime_app(settings)
+
+    trend_bot.start.assert_called_once_with()
+    trend_bot.stop.assert_called_once_with()

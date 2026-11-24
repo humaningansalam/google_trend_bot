@@ -3,19 +3,35 @@ services:
     build:
       context: .
       args:
-        VERSION: ${VERSION}
-      tags:
-        - "google_trend_bot:${VERSION}"
+        VERSION: ${VERSION:-dev}
+    image: google_trend_bot:${VERSION:-dev}
     container_name: google_trend_bot
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    shm_size: "1gb"
     networks:
       - bridge_server
     ports:
-      - 12025:5000
+      - "12025:5000"
     env_file:
       - .env
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=3).read()
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    stop_grace_period: 10s
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
         max-size: "2m"
         max-file: "5"

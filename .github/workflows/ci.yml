@@ -1,0 +1,223 @@
+name: CI and deployment
+
+on:
+  pull_request:
+  push:
+    branches:
+      - dev
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: google-trend-bot-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.9.16"
+
+jobs:
+  quality:
+    name: Quality checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install uv
+        run: python -m pip install "uv==${UV_VERSION}"
+
+      - name: Sync locked dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Audit Python dependencies
+        run: uv run pip-audit --local --progress-spinner off
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Compile Python sources
+        run: uv run python -m compileall -q src tests
+
+  container:
+    name: Container smoke test
+    needs: quality
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.project.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read project version
+        id: project
+        shell: bash
+        run: |
+          version="$(python3 -c 'from pathlib import Path; import tomllib; print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])')"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg "VERSION=${{ steps.project.outputs.version }}" \
+            --tag "google-trend-bot:${{ github.sha }}" \
+            .
+
+      - name: Start image
+        run: |
+          docker run --detach \
+            --name google-trend-bot-ci \
+            --publish 127.0.0.1:5000:5000 \
+            --env SLACK_WEBHOOK=https://example.invalid/services/ci \
+            --env CONTROL_TOKEN=ci-token \
+            "google-trend-bot:${{ github.sha }}"
+
+      - name: Wait for health endpoint
+        shell: bash
+        run: |
+          for _ in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:5000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs google-trend-bot-ci
+          exit 1
+
+      - name: Verify container runtime
+        shell: bash
+        run: |
+          docker exec google-trend-bot-ci python -c \
+            'import os, sys; assert sys.version_info[:2] == (3, 11); assert os.getuid() == 10001'
+
+          docker exec --interactive google-trend-bot-ci python - <<'PYTHON'
+          import asyncio
+          from playwright.async_api import async_playwright
+
+          async def main() -> None:
+              async with async_playwright() as playwright:
+                  browser = await playwright.chromium.launch(headless=True)
+                  await browser.close()
+
+          asyncio.run(main())
+          PYTHON
+
+          metrics="$(curl --fail --silent http://127.0.0.1:5000/metrics)"
+          grep -q 'request_processing_seconds' <<<"$metrics"
+          grep -q 'get_trend_data_total' <<<"$metrics"
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs google-trend-bot-ci
+
+      - name: Remove smoke-test container
+        if: always()
+        run: docker rm --force google-trend-bot-ci || true
+
+  deploy:
+    name: Deploy master
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: container
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      VERSION: ${{ needs.container.outputs.version }}
+      APP_NAME: ${{ vars.APP_NAME || 'google-trend-bot' }}
+      APP_ENV: ${{ vars.APP_ENV || 'production' }}
+      LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+      LOG_FILE: ${{ vars.LOG_FILE || './logs/bot.log' }}
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+      LOKI_URL: ${{ secrets.LOKI_URL }}
+      SCRAPER_BACKEND: ${{ vars.SCRAPER_BACKEND || (vars.USE_SERVER == 'True' && 'remote' || 'local') }}
+      SCHEDULE_INTERVAL: ${{ vars.SCHEDULE_INTERVAL || '10' }}
+      CONTROL_TOKEN: ${{ secrets.CONTROL_TOKEN }}
+      PLAYWRIGHT_URL: ${{ secrets.PLAYWRIGHT_URL || vars.PLAYWRIGHT_URL || 'http://localhost:3000' }}
+      BIND_HOST: 127.0.0.1
+      PORT: "5000"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Copy runtime source
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: ".dockerignore,.python-version,Dockerfile,docker-compose.yml,pyproject.toml,uv.lock,README.md,src"
+          target: "~/docker/google_trend_slack_bot/"
+
+      - name: Build and restart service
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 20m
+          envs: VERSION,APP_NAME,APP_ENV,LOG_LEVEL,LOG_FILE,SLACK_WEBHOOK,LOKI_URL,SCRAPER_BACKEND,SCHEDULE_INTERVAL,CONTROL_TOKEN,PLAYWRIGHT_URL,BIND_HOST,PORT
+          script: |
+            set -eu
+            cd ~/docker/google_trend_slack_bot/
+            umask 077
+            {
+              printf 'APP_NAME=%s\n' "$APP_NAME"
+              printf 'APP_ENV=%s\n' "$APP_ENV"
+              printf 'LOG_LEVEL=%s\n' "$LOG_LEVEL"
+              printf 'LOG_FILE=%s\n' "$LOG_FILE"
+              printf 'VERSION=%s\n' "$VERSION"
+              printf 'SLACK_WEBHOOK=%s\n' "$SLACK_WEBHOOK"
+              printf 'LOKI_URL=%s\n' "$LOKI_URL"
+              printf 'SCRAPER_BACKEND=%s\n' "$SCRAPER_BACKEND"
+              printf 'SCHEDULE_INTERVAL=%s\n' "$SCHEDULE_INTERVAL"
+              printf 'CONTROL_TOKEN=%s\n' "$CONTROL_TOKEN"
+              printf 'PLAYWRIGHT_URL=%s\n' "$PLAYWRIGHT_URL"
+              printf 'BIND_HOST=%s\n' "$BIND_HOST"
+              printf 'PORT=%s\n' "$PORT"
+            } > .env
+
+            docker network inspect bridge_server >/dev/null 2>&1 \
+              || docker network create bridge_server
+            docker compose up --detach --build --remove-orphans
+
+            container_id="$(docker compose ps --quiet google_trend_bot)"
+            if [ -z "$container_id" ]; then
+              docker compose logs
+              exit 1
+            fi
+
+            for _ in $(seq 1 40); do
+              health_status="$(
+                docker inspect \
+                  --format '{{.State.Health.Status}}' \
+                  "$container_id"
+              )"
+              if [ "$health_status" = "healthy" ]; then
+                exit 0
+              fi
+              if [ "$health_status" = "unhealthy" ]; then
+                docker compose logs
+                exit 1
+              fi
+              sleep 3
+            done
+
+            docker compose logs
+            exit 1

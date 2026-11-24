@@ -12,31 +12,27 @@ def test_crawl_extracts_a_trend_row():
     volume_element = Mock()
     volume_element.inner_text = AsyncMock(return_value="100K+")
 
-    row = Mock()
-    row.query_selector = AsyncMock(
+    trend_row = Mock()
+    trend_row.query_selector = AsyncMock(
         side_effect=lambda selector: {
             ".mZ3RIc": title_element,
             ".lqv0Cb": volume_element,
         }[selector]
     )
-    row.click = AsyncMock()
+    trend_row.click = AsyncMock()
 
-    first_news_title = Mock()
-    first_news_title.count = AsyncMock(return_value=1)
-    first_news_title.inner_text = AsyncMock(return_value="Primary headline")
-    title_matches = Mock()
-    title_matches.first = first_news_title
+    news_title = Mock()
+    news_title.count = AsyncMock(return_value=1)
+    news_title.inner_text = AsyncMock(return_value="Primary headline")
+    title_matches = Mock(first=news_title)
 
-    first_news_link = Mock()
-    first_news_link.count = AsyncMock(return_value=1)
-    first_news_link.get_attribute = AsyncMock(
-        return_value="https://example.test/primary"
-    )
-    link_matches = Mock()
-    link_matches.first = first_news_link
+    news_link = Mock()
+    news_link.count = AsyncMock(return_value=1)
+    news_link.get_attribute = AsyncMock(return_value="https://example.test/primary")
+    link_matches = Mock(first=news_link)
 
-    news = Mock()
-    news.locator = Mock(
+    news_card = Mock()
+    news_card.locator = Mock(
         side_effect=lambda selector: {
             ".QbLC8c": title_matches,
             "a": link_matches,
@@ -45,15 +41,13 @@ def test_crawl_extracts_a_trend_row():
     analysis_locator = Mock()
     analysis_locator.all_inner_texts = AsyncMock(return_value=["Analysis"])
     news_locator = Mock()
-    news_locator.all = AsyncMock(return_value=[news])
+    news_locator.all = AsyncMock(return_value=[news_card])
 
     detail_panel = Mock()
     detail_panel.wait_for = AsyncMock()
     detail_panel.locator = Mock(
         side_effect=lambda selector: (
-            analysis_locator
-            if selector.startswith("span[")
-            else news_locator
+            analysis_locator if selector.startswith("span[") else news_locator
         )
     )
     panels = Mock()
@@ -62,7 +56,7 @@ def test_crawl_extracts_a_trend_row():
     page = Mock()
     page.goto = AsyncMock()
     page.wait_for_selector = AsyncMock()
-    page.query_selector_all = AsyncMock(return_value=[row])
+    page.query_selector_all = AsyncMock(return_value=[trend_row])
     page.query_selector = AsyncMock(return_value=None)
     page.locator.return_value = panels
     page.get_by_role.return_value = Mock()
@@ -96,13 +90,13 @@ def test_crawl_propagates_navigation_failure():
 
 
 def test_crawl_rejects_total_extraction_failure():
-    row = Mock()
-    row.query_selector = AsyncMock(return_value=None)
+    trend_row = Mock()
+    trend_row.query_selector = AsyncMock(return_value=None)
 
     page = Mock()
     page.goto = AsyncMock()
     page.wait_for_selector = AsyncMock()
-    page.query_selector_all = AsyncMock(return_value=[row])
+    page.query_selector_all = AsyncMock(return_value=[trend_row])
     page.query_selector = AsyncMock(return_value=None)
 
     with pytest.raises(

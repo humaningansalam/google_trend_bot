@@ -1,285 +1,334 @@
 import logging
+from dataclasses import replace
 from datetime import datetime, timedelta
+from itertools import count
 from threading import Event, Thread
 from time import sleep
 from unittest.mock import Mock, patch
+from zoneinfo import ZoneInfo
 
+import pytest
 import requests
-from pytz import timezone
 
-from src.bot.rss_bot import RSSBot
+from src.bot.trend_alert_bot import TrendAlertBot
+from src.common.rss_parser import TrendEntry
 
-
-def test_bot_reset_trend(test_bot, mock_rss_parser, mock_send_alert):
-    seoul_tz = timezone("Asia/Seoul")
-    current_time = datetime.now(seoul_tz)
-    old_time = current_time - timedelta(days=5)
-    new_time = current_time - timedelta(days=1)
-
-    mock_rss_parser.parse.return_value = [
-        {
-            "title": "Old Trend",
-            "content": "old",
-            "link": "http://example.com/old",
-            "published": "old",
-            "parsed_time": old_time,
-        },
-        {
-            "title": "New Trend",
-            "content": "new",
-            "link": "http://example.com/new",
-            "published": "new",
-            "parsed_time": new_time,
-        },
-    ]
-
-    test_bot.job()
-    mock_send_alert.reset_mock()
-    test_bot.reset_trend()
-    test_bot.job()
-
-    mock_send_alert.assert_called_once()
-    assert mock_send_alert.call_args.args[0].startswith("Old Trend\n")
+SEOUL_TIME_ZONE = ZoneInfo("Asia/Seoul")
 
 
-def test_bot_job_deduplicates_trends_within_memory_window(test_bot, mock_send_alert):
-    test_bot.job()
-    test_bot.job()
+def test_pruning_releases_only_entries_outside_the_memory_window(
+    trend_bot: TrendAlertBot,
+    mock_trend_feed: Mock,
+    mock_alert_sender: Mock,
+    trend_entry: TrendEntry,
+):
+    now = datetime(2026, 11, 24, 12, 0, tzinfo=SEOUL_TIME_ZONE)
+    old_entry = replace(
+        trend_entry,
+        title="Old Trend",
+        observed_at=now - timedelta(days=5),
+    )
+    recent_entry = replace(
+        trend_entry,
+        title="Recent Trend",
+        observed_at=now - timedelta(days=1),
+    )
+    mock_trend_feed.parse.return_value = [old_entry, recent_entry]
 
-    mock_send_alert.assert_called_once()
+    trend_bot.poll_trends_once()
+    mock_alert_sender.reset_mock()
+    trend_bot.prune_seen_trends(now=now)
+    trend_bot.poll_trends_once()
+
+    mock_alert_sender.assert_called_once()
+    assert mock_alert_sender.call_args.args[0].startswith("Old Trend\n")
 
 
-def test_bot_reset_does_not_raise_when_run_concurrently_with_job(test_bot, client, mock_rss_parser):
-    should_stop = Event()
-    counter = {"i": 0}
+def test_poll_suppresses_a_title_already_delivered(
+    trend_bot: TrendAlertBot,
+    mock_alert_sender: Mock,
+):
+    trend_bot.poll_trends_once()
+    trend_bot.poll_trends_once()
 
-    def parse(*_args, **_kwargs):
-        counter["i"] += 1
+    mock_alert_sender.assert_called_once()
+
+
+def test_pruning_and_polling_can_run_concurrently(
+    trend_bot: TrendAlertBot,
+    mock_trend_feed: Mock,
+    trend_entry: TrendEntry,
+):
+    stop_polling = Event()
+    title_numbers = count(1)
+
+    def next_entry(_url: str) -> list[TrendEntry]:
         return [
-            {
-                "title": f"trend-{counter['i']}",
-                "content": "dup",
-                "link": "http://example.com",
-                "published": "now",
-                "parsed_time": datetime.now(timezone("Asia/Seoul")),
-            }
+            replace(
+                trend_entry,
+                title=f"trend-{next(title_numbers)}",
+                observed_at=datetime.now(SEOUL_TIME_ZONE),
+            )
         ]
 
-    mock_rss_parser.parse.side_effect = parse
+    mock_trend_feed.parse.side_effect = next_entry
 
-    def mutate_trend_memory():
-        while not should_stop.is_set():
-            test_bot.job()
+    def poll_until_stopped() -> None:
+        while not stop_polling.is_set():
+            trend_bot.poll_trends_once()
 
-    worker = Thread(target=mutate_trend_memory, daemon=True)
-    worker.start()
+    polling_thread = Thread(target=poll_until_stopped, daemon=True)
+    polling_thread.start()
 
     try:
         for _ in range(200):
-            response = client.post("/reset")
-            assert response.status_code == 200
+            trend_bot.prune_seen_trends()
             sleep(0)
     finally:
-        should_stop.set()
-        worker.join(timeout=2)
-        assert not worker.is_alive()
+        stop_polling.set()
+        polling_thread.join(timeout=2)
+
+    assert not polling_thread.is_alive()
 
 
-def test_bot_job_retries_on_send_failure_then_marks_trend_on_success(test_bot, mock_send_alert):
-    mock_send_alert.side_effect = [RuntimeError("Slack API failure"), None]
+def test_failed_delivery_is_retried_until_it_succeeds(
+    trend_bot: TrendAlertBot,
+    mock_alert_sender: Mock,
+):
+    mock_alert_sender.side_effect = [RuntimeError("Slack API failure"), None]
 
-    test_bot.job()
-    test_bot.job()
-    test_bot.job()
+    trend_bot.poll_trends_once()
+    trend_bot.poll_trends_once()
+    trend_bot.poll_trends_once()
 
-    assert mock_send_alert.call_count == 2
+    assert mock_alert_sender.call_count == 2
 
 
-def test_bot_retries_when_slack_returns_http_error(mock_rss_parser, monkeypatch):
-    response = Mock(status_code=500)
-    post = Mock(return_value=response)
-    monkeypatch.setattr("src.bot.rss_bot.requests.post", post)
-    bot = RSSBot(
-        rss_parser=mock_rss_parser,
-        interval=10,
+def test_slack_http_failure_does_not_mark_the_title_as_delivered(
+    mock_trend_feed: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    failed_response = requests.Response()
+    failed_response.status_code = 500
+    post = Mock(return_value=failed_response)
+    monkeypatch.setattr("src.bot.trend_alert_bot.requests.post", post)
+    bot = TrendAlertBot(
+        mock_trend_feed,
+        poll_interval_minutes=10,
         webhook_url="https://hooks.slack.test/services/example",
     )
 
-    bot.job()
-    bot.job()
+    bot.poll_trends_once()
+    bot.poll_trends_once()
 
     assert post.call_count == 2
-    assert "Test Trend" not in bot.trend_dict
 
 
-def test_bot_does_not_log_the_slack_webhook_on_http_failure(
-    mock_rss_parser, monkeypatch, caplog
+def test_slack_http_failure_does_not_log_the_webhook_secret(
+    mock_trend_feed: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ):
     webhook_url = "https://hooks.slack.test/services/T000/B000/SUPERSECRET"
-    response = requests.Response()
-    response.status_code = 500
-    response.url = webhook_url
+    failed_response = requests.Response()
+    failed_response.status_code = 500
+    failed_response.url = webhook_url
     monkeypatch.setattr(
-        "src.bot.rss_bot.requests.post", Mock(return_value=response)
+        "src.bot.trend_alert_bot.requests.post",
+        Mock(return_value=failed_response),
     )
-    bot = RSSBot(
-        rss_parser=mock_rss_parser,
-        interval=10,
+    bot = TrendAlertBot(
+        mock_trend_feed,
+        poll_interval_minutes=10,
         webhook_url=webhook_url,
     )
 
-    with caplog.at_level(logging.ERROR, logger="RSSBot"):
-        bot.job()
+    with caplog.at_level(logging.ERROR, logger="src.bot.trend_alert_bot"):
+        bot.poll_trends_once()
 
     assert webhook_url not in caplog.text
     assert "Slack webhook returned HTTP 500" in caplog.text
 
 
-def test_bot_does_not_log_the_slack_webhook_on_transport_failure(
-    mock_rss_parser, monkeypatch, caplog
+def test_slack_transport_failure_does_not_log_the_webhook_secret(
+    mock_trend_feed: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ):
     webhook_url = "https://hooks.slack.test/services/T000/B000/SUPERSECRET"
     monkeypatch.setattr(
-        "src.bot.rss_bot.requests.post",
+        "src.bot.trend_alert_bot.requests.post",
         Mock(side_effect=requests.ConnectionError(f"failed: {webhook_url}")),
     )
-    bot = RSSBot(
-        rss_parser=mock_rss_parser,
-        interval=10,
+    bot = TrendAlertBot(
+        mock_trend_feed,
+        poll_interval_minutes=10,
         webhook_url=webhook_url,
     )
 
-    with caplog.at_level(logging.ERROR, logger="RSSBot"):
-        bot.job()
+    with caplog.at_level(logging.ERROR, logger="src.bot.trend_alert_bot"):
+        bot.poll_trends_once()
 
     assert webhook_url not in caplog.text
     assert "Slack webhook request failed" in caplog.text
 
 
-def test_bot_job_recovers_after_parser_error(test_bot, mock_rss_parser, mock_send_alert):
-    entries = mock_rss_parser.parse.return_value
-    mock_rss_parser.parse.side_effect = [RuntimeError("parser failure"), entries]
-
-    test_bot.job()
-    test_bot.job()
-
-    mock_send_alert.assert_called_once()
-
-
-def test_bot_job_continues_after_one_payload_is_rejected(
-    test_bot, mock_rss_parser, mock_send_alert
+def test_poll_recovers_after_a_feed_error(
+    trend_bot: TrendAlertBot,
+    mock_trend_feed: Mock,
+    mock_alert_sender: Mock,
 ):
-    mock_rss_parser.parse.return_value = [
-        {
-            "title": "Bad Trend",
-            "content": "rejected payload",
-            "link": "http://example.com/bad",
-            "published": "now",
-            "parsed_time": datetime.now(timezone("Asia/Seoul")),
-        },
-        {
-            "title": "Good Trend",
-            "content": "valid payload",
-            "link": "http://example.com/good",
-            "published": "now",
-            "parsed_time": datetime.now(timezone("Asia/Seoul")),
-        },
-    ]
+    entries = mock_trend_feed.parse.return_value
+    mock_trend_feed.parse.side_effect = [RuntimeError("parser failure"), entries]
 
-    def send_alert(message):
+    trend_bot.poll_trends_once()
+    trend_bot.poll_trends_once()
+
+    mock_alert_sender.assert_called_once()
+
+
+def test_one_rejected_alert_does_not_block_later_entries(
+    trend_bot: TrendAlertBot,
+    mock_trend_feed: Mock,
+    mock_alert_sender: Mock,
+    trend_entry: TrendEntry,
+):
+    bad_entry = replace(trend_entry, title="Bad Trend")
+    good_entry = replace(trend_entry, title="Good Trend")
+    mock_trend_feed.parse.return_value = [bad_entry, good_entry]
+
+    def reject_bad_trend(message: str) -> None:
         if message.startswith("Bad Trend\n"):
             raise RuntimeError("payload rejected")
 
-    mock_send_alert.side_effect = send_alert
+    mock_alert_sender.side_effect = reject_bad_trend
 
-    test_bot.job()
-    test_bot.job()
+    trend_bot.poll_trends_once()
+    trend_bot.poll_trends_once()
 
     attempted_titles = [
-        call.args[0].splitlines()[0]
-        for call in mock_send_alert.call_args_list
+        call.args[0].splitlines()[0] for call in mock_alert_sender.call_args_list
     ]
     assert attempted_titles == ["Bad Trend", "Good Trend", "Bad Trend"]
 
 
-def test_bot_start_stop(test_bot):
-    assert not test_bot.is_running
-    assert test_bot.start()
-    assert test_bot.is_running
-    test_bot.stop()
-    assert not test_bot.is_running
+def test_worker_can_start_and_stop(trend_bot: TrendAlertBot):
+    assert not trend_bot.is_active()
+    assert trend_bot.start()
+    assert trend_bot.is_active()
+    assert trend_bot.stop()
+    assert not trend_bot.is_active()
 
 
-def test_bot_start_is_idempotent(test_bot):
-    test_bot.start()
-    first_thread = test_bot.thread
-    test_bot.start()
-    assert test_bot.thread is first_thread
-    test_bot.stop()
+def test_start_does_not_create_a_second_worker(trend_bot: TrendAlertBot):
+    assert trend_bot.start()
+    first_worker = trend_bot.worker_thread
+
+    assert not trend_bot.start()
+    assert trend_bot.worker_thread is first_worker
 
 
-def test_bot_stop_is_idempotent_and_bounded(test_bot):
-    test_bot.start()
-    with patch.object(test_bot.thread, "join", wraps=test_bot.thread.join) as join_mock:
-        test_bot.stop()
-        test_bot.stop()
+def test_stop_is_idempotent_and_uses_the_configured_timeout(
+    trend_bot: TrendAlertBot,
+):
+    trend_bot.start()
+    worker = trend_bot.worker_thread
+    assert worker is not None
+
+    with patch.object(worker, "join", wraps=worker.join) as join_mock:
+        assert trend_bot.stop()
+        assert trend_bot.stop()
+
     join_mock.assert_called_once_with(timeout=0.1)
 
 
-def test_bot_stop_timeout_keeps_single_worker_until_old_thread_exits(test_bot):
-    start_gate = Event()
-    release_gate = Event()
-    original_run = test_bot.run
+def test_timed_out_stop_prevents_a_second_worker(
+    mock_trend_feed: Mock,
+    mock_alert_sender: Mock,
+):
+    worker_entered = Event()
+    release_worker = Event()
+    bot = TrendAlertBot(
+        mock_trend_feed,
+        poll_interval_minutes=10,
+        stop_timeout_seconds=0.01,
+        scheduler_check_interval_seconds=0.01,
+        alert_sender=mock_alert_sender,
+    )
+    original_loop = bot._run_scheduler_loop
 
-    def blocked_run():
-        start_gate.set()
-        release_gate.wait(timeout=1)
-        original_run()
+    def blocked_loop() -> None:
+        worker_entered.set()
+        release_worker.wait(timeout=1)
+        original_loop()
 
-    with patch.object(test_bot, "run", side_effect=blocked_run):
-        assert test_bot.start()
-        assert start_gate.wait(timeout=1)
-        first_thread = test_bot.thread
+    with patch.object(bot, "_run_scheduler_loop", side_effect=blocked_loop):
+        assert bot.start()
+        assert worker_entered.wait(timeout=1)
+        first_worker = bot.worker_thread
+        assert first_worker is not None
 
-        test_bot.stop_timeout = 0.01
-        assert not test_bot.stop()
-        assert test_bot.is_running
-        assert test_bot.thread is first_thread
+        assert not bot.stop()
+        assert bot.is_active()
+        assert not bot.start()
+        assert bot.worker_thread is first_worker
 
-        assert not test_bot.start()
-        assert test_bot.thread is first_thread
-
-        release_gate.set()
-        first_thread.join(timeout=1)
-        assert test_bot.start()
-        second_thread = test_bot.thread
-        assert second_thread is not None and second_thread is not first_thread
-        test_bot.stop()
+        release_worker.set()
+        first_worker.join(timeout=1)
+        assert bot.start()
+        second_worker = bot.worker_thread
+        assert second_worker is not None
+        assert second_worker is not first_worker
+        assert bot.stop()
 
 
-def test_bot_start_and_stop_from_multiple_callers_stay_single_thread(test_bot):
-    start_threads = []
-    stop_threads = []
+def test_concurrent_start_and_stop_calls_keep_one_worker(
+    trend_bot: TrendAlertBot,
+):
+    start_callers = [Thread(target=trend_bot.start) for _ in range(3)]
+    for caller in start_callers:
+        caller.start()
+    for caller in start_callers:
+        caller.join(timeout=1)
 
-    for _ in range(3):
-        thread = Thread(target=test_bot.start)
-        thread.start()
-        start_threads.append(thread)
+    first_worker = trend_bot.worker_thread
+    assert first_worker is not None
 
-    for thread in start_threads:
-        thread.join(timeout=1)
+    stop_callers = [Thread(target=trend_bot.stop) for _ in range(3)]
+    for caller in stop_callers:
+        caller.start()
+    for caller in stop_callers:
+        caller.join(timeout=1)
 
-    first_thread = test_bot.thread
-    assert first_thread is not None
+    current_worker = trend_bot.worker_thread
+    assert current_worker is None or not current_worker.is_alive()
+    assert current_worker in {None, first_worker}
 
-    for _ in range(3):
-        thread = Thread(target=test_bot.stop)
-        thread.start()
-        stop_threads.append(thread)
 
-    for thread in stop_threads:
-        thread.join(timeout=1)
-
-    assert test_bot.thread is None or not test_bot.thread.is_alive()
-    assert first_thread is not None
-    assert test_bot.thread in {None, first_thread}
+@pytest.mark.parametrize(
+    ("keyword_arguments", "message"),
+    [
+        ({"poll_interval_minutes": 0}, "poll_interval_minutes"),
+        (
+            {
+                "poll_interval_minutes": 1,
+                "stop_timeout_seconds": -1,
+            },
+            "stop_timeout_seconds",
+        ),
+        (
+            {
+                "poll_interval_minutes": 1,
+                "scheduler_check_interval_seconds": 0,
+            },
+            "scheduler_check_interval_seconds",
+        ),
+    ],
+)
+def test_constructor_rejects_invalid_timing_values(
+    mock_trend_feed: Mock,
+    keyword_arguments: dict[str, float],
+    message: str,
+):
+    with pytest.raises(ValueError, match=message):
+        TrendAlertBot(mock_trend_feed, **keyword_arguments)

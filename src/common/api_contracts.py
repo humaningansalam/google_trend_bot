@@ -1,11 +1,11 @@
-from enum import Enum
+from enum import StrEnum
 
-from flask import jsonify
+from flask import Response, jsonify
 
 from src.common.scrape_contracts import ScrapeErrorCode
 
 
-class ApiErrorCode(str, Enum):
+class ApiErrorCode(StrEnum):
     UNAUTHORIZED = "unauthorized"
     BOT_NOT_INITIALIZED = "bot_not_initialized"
     BOT_ALREADY_RUNNING = "bot_already_running"
@@ -17,13 +17,16 @@ class ApiErrorCode(str, Enum):
     INTERNAL_ERROR = "internal_error"
 
 
-class BotState(str, Enum):
+class BotState(StrEnum):
     RUNNING = "running"
     STOPPED = "stopped"
     STOPPING = "stopping"
 
 
-def success_response(http_status: int = 200, **payload):
+ApiResponse = tuple[Response, int]
+
+
+def success_response(http_status: int = 200, **payload: object) -> ApiResponse:
     return jsonify({"status": "success", **payload}), http_status
 
 
@@ -31,15 +34,15 @@ def error_response(
     code: ApiErrorCode | ScrapeErrorCode,
     message: str,
     http_status: int,
-):
+) -> ApiResponse:
     return (
         jsonify({"status": "error", "code": code.value, "message": message}),
         http_status,
     )
 
 
-def scrape_error_response(
+def upstream_error_response(
     code: ApiErrorCode | ScrapeErrorCode,
     message: str,
-):
+) -> ApiResponse:
     return error_response(code, message, 502)

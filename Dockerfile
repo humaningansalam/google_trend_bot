@@ -1,45 +1,53 @@
-FROM debian:bookworm-slim
+FROM python:3.11-slim-bookworm AS dependencies
 
-ARG VERSION
-ARG INSTALL_DEV=false
+ENV UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
 
-ENV VERSION=$VERSION
-ENV SLACK_WEBHOOK=api_key
-ENV LOG_LEVEL=INFO
-ENV SCHEDULE_INTERVAL=10
-
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.9.16 /uv /bin/uv
 
 WORKDIR /usr/src/app
 
+COPY .python-version pyproject.toml uv.lock ./
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-    git \
-    wget \
-    unzip \
-    curl \
-    ca-certificates \
-    libglib2.0-0 libnss3 libnspr4 libdbus-1-3 libatk1.0-0 \
-    libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
-    libatspi2.0-0 libxcb1 libx11-6 libxcomposite1 \
-    libxdamage1 libxext6 libxfixes3 libxrandr2 \
-    libgbm1 libpango-1.0-0 libcairo2 libasound2 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends git \
+    && uv sync \
+        --python /usr/local/bin/python3.11 \
+        --frozen \
+        --no-dev \
+        --no-install-project \
+    && rm -rf /root/.cache/uv /var/lib/apt/lists/*
 
-COPY pyproject.toml uv.lock* ./
 
-RUN uv sync --frozen --python 3.11 --no-dev --no-install-project && \
-    if [ "$INSTALL_DEV" = "true" ]; then \
-        uv sync --frozen --python 3.11 --group dev --no-install-project; \
-    fi
+FROM python:3.11-slim-bookworm AS runtime
 
-RUN .venv/bin/playwright install --with-deps chromium
+ARG VERSION=dev
+
+ENV VERSION=${VERSION} \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PATH="/usr/src/app/.venv/bin:${PATH}" \
+    LOG_LEVEL=INFO \
+    LOG_FILE=./logs/bot.log \
+    SCHEDULE_INTERVAL=10
+
+WORKDIR /usr/src/app
+
+COPY --from=dependencies /usr/src/app/.venv ./.venv
+RUN DEBIAN_FRONTEND=noninteractive \
+    playwright install --with-deps --only-shell chromium \
+    && rm -rf /var/lib/apt/lists/* \
+    && chmod -R a+rX /ms-playwright \
+    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin app \
+    && mkdir -p logs \
+    && chown app:app logs
 
 COPY . .
 
-ENV PATH="/usr/src/app/.venv/bin:$PATH"
+ENV HOME=/home/app
+
+USER app
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "src.main:create_runtime_app()"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "src.main:create_runtime_app()"]

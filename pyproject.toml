@@ -1,25 +1,46 @@
 [project]
 name = "google-trend-bot"
-version = "0.3.5"
-description = "Google Trends alerts for Slack with a Flask control surface"
+version = "0.4.0"
+description = "Google Trends RSS alerts and on-demand trend scraping"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "certifi>=2026.10.18",
     "feedparser>=6.0.12",
-    "pandas>=2.3.3",
-    "playwright>=1.61.0",
-    "pytz>=2025.2",
-    "requests>=2.32.5",
-    "schedule>=1.2.2",
-    "his-monitoring",
-    "prometheus-client>=0.23.1",
-    "flask[async]>=3.1.2",
+    "flask[async]>=3.1.3",
     "gunicorn>=23.0.0",
+    "his-monitoring",
+    "idna>=3.15",
+    "playwright>=1.61.0",
+    "prometheus-client>=0.23.1",
+    "requests>=2.33.0",
+    "schedule>=1.2.2",
+    "urllib3>=2.8.0",
+    "werkzeug>=3.1.9",
 ]
+
 [tool.uv.sources]
-his-monitoring = { git = "https://github.com/humaningansalam/his-monitoring.git", branch = "main" }
+his-monitoring = { git = "https://github.com/humaningansalam/his-monitoring.git", rev = "449a45fd2884e58cefc984ff2b15660d042432ca" }
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.2",
+    "pip-audit==2.10.1",
+    "pygments>=2.20.0",
+    "pytest>=9.0.3",
+    "ruff>=0.15.21",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+extend-exclude = [".gstack"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM", "C4", "C90", "PIE", "PERF", "RUF", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105"]

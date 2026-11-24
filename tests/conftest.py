@@ -1,48 +1,55 @@
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from src.bot.rss_bot import RSSBot
-from src.bot.scraper import Scraper
+from src.bot.scraper import GoogleTrendsScraper
+from src.bot.trend_alert_bot import TrendAlertBot
+from src.common.rss_parser import TrendEntry
 from src.common.scrape_contracts import ScrapeResult
 from src.main import create_app
 
-
-@pytest.fixture
-def mock_rss_parser():
-    parser = Mock()
-    parser.parse.return_value = [
-        {
-            "title": "Test Trend",
-            "content": "Test Content",
-            "link": "http://test.com",
-            "published": "2024-01-01",
-            "parsed_time": datetime(2024, 1, 1, 0, 0, 0),
-        }
-    ]
-    return parser
+SEOUL_TIME_ZONE = ZoneInfo("Asia/Seoul")
 
 
 @pytest.fixture
-def mock_send_alert():
-    return Mock()
-
-
-@pytest.fixture
-def test_bot(mock_rss_parser, mock_send_alert):
-    return RSSBot(
-        rss_parser=mock_rss_parser,
-        interval=10,
-        stop_timeout=0.1,
-        sleep_interval=0.01,
-        alert_sender=mock_send_alert,
+def trend_entry() -> TrendEntry:
+    return TrendEntry(
+        title="Test Trend",
+        content="Test Content",
+        link="https://example.test/trend",
+        published="2026-11-24T09:00:00+09:00",
+        observed_at=datetime(2026, 11, 24, 9, 0, tzinfo=SEOUL_TIME_ZONE),
     )
 
 
 @pytest.fixture
-def test_scraper():
-    scraper = Scraper()
+def mock_trend_feed(trend_entry: TrendEntry) -> Mock:
+    trend_feed = Mock()
+    trend_feed.parse.return_value = [trend_entry]
+    return trend_feed
+
+
+@pytest.fixture
+def mock_alert_sender() -> Mock:
+    return Mock()
+
+
+@pytest.fixture
+def trend_bot(mock_trend_feed: Mock, mock_alert_sender: Mock) -> TrendAlertBot:
+    return TrendAlertBot(
+        mock_trend_feed,
+        poll_interval_minutes=10,
+        stop_timeout_seconds=0.1,
+        scheduler_check_interval_seconds=0.01,
+        alert_sender=mock_alert_sender,
+    )
+
+
+@pytest.fixture
+def trend_scraper() -> GoogleTrendsScraper:
+    scraper = GoogleTrendsScraper()
     scraper.scrape_trends = AsyncMock(
         return_value=ScrapeResult.success([{"trend": "Test Trend"}])
     )
@@ -50,10 +57,16 @@ def test_scraper():
 
 
 @pytest.fixture
-def app(test_bot, test_scraper):
-    app = create_app(bot=test_bot, scraper=test_scraper)
-    app.config["TESTING"] = True
-    return app
+def app(
+    trend_bot: TrendAlertBot,
+    trend_scraper: GoogleTrendsScraper,
+):
+    flask_app = create_app(
+        trend_alert_bot=trend_bot,
+        trend_scraper=trend_scraper,
+    )
+    flask_app.config["TESTING"] = True
+    return flask_app
 
 
 @pytest.fixture
@@ -61,8 +74,8 @@ def client(app):
     return app.test_client()
 
 
-@pytest.fixture(scope="function", autouse=True)
-def cleanup_bot(test_bot):
+@pytest.fixture(autouse=True)
+def stop_worker_after_test(trend_bot: TrendAlertBot):
     yield
-    if test_bot.is_running:
-        test_bot.stop()
+    if trend_bot.is_active():
+        trend_bot.stop()

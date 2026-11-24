@@ -1,61 +1,108 @@
-# google_trend_bot
+# Google Trend Bot
 
-Google Trends alerts for Slack with a small Flask control surface.
+A small Flask service that sends new Google Trends RSS entries to Slack and exposes an on-demand Google Trends scraper.
 
-## Local run
+## Runtime flow
 
-1. Copy `.env.example` to `.env` and fill in `SLACK_WEBHOOK`.
-2. Install dependencies with `uv sync`.
-3. Install the Chromium browser used by the local scraper with `uv run playwright install chromium`.
-4. Start the service with `uv run --env-file .env python -m src.main`.
+- `TrendAlertBot` polls the Korea Google Trends RSS feed on one in-process scheduler thread.
+- A title is sent once, then remembered for three days. Failed Slack deliveries remain eligible for retry.
+- `GET /trends` runs the Playwright crawler locally or submits the same crawler to a remote Playwright job server.
+- Flask exposes health, control, scrape, and Prometheus endpoints. Gunicorn runs one process so the scheduler is not duplicated.
 
-`uv run` does not load `.env` automatically, so keep the `--env-file .env` option when starting the service locally.
-Leave `LOKI_URL` empty unless a Loki push endpoint is reachable from the local machine.
+## Local setup
 
-On Linux hosts that do not already have Chromium system libraries, run `uv run playwright install --with-deps chromium` instead.
+```bash
+cp .env.example .env
+# Set SLACK_WEBHOOK in .env before starting the service.
 
-## Environment variables
+uv sync --group dev
+uv run playwright install chromium
+uv run --env-file .env python -m src.main
+```
 
-- `SLACK_WEBHOOK`: Slack incoming webhook URL.
-- `VERSION`: Container image tag used by Compose, default `0.3.5` in `.env.example`.
-- `LOKI_URL`: Optional Loki push endpoint used by logging. Leave it empty to disable Loki output.
-- `SCHEDULE_INTERVAL`: RSS polling interval in minutes. Must be a positive integer.
-- `CONTROL_TOKEN`: Optional bearer token for `/start`, `/stop`, and `/reset`. When unset, those endpoints keep their current local behavior.
-- `LOG_LEVEL`: Python log level, default `INFO`.
-- `APP_NAME`: App tag written into logs, default `google-trend-bot`.
-- `APP_ENV`: Environment tag written into logs, default `dev`.
-- `USE_SERVER`: `False` selects the local browser and `True` selects the remote Playwright job server. Other values are rejected at startup.
-- `PLAYWRIGHT_URL`: Browser automation base URL used by scraping support code.
+On Linux machines without Chromium system libraries, install them with:
 
-## Tests
+```bash
+uv run playwright install --with-deps chromium
+```
 
-- Run the focused suite with `uv run pytest -q tests/test_bot.py tests/test_scraper.py tests/test_flask_app.py tests/test_config.py`.
-- Run the full suite with `uv run pytest -q`.
-- Run a syntax check with `uv run python -m py_compile src/config.py src/main.py src/bot/rss_bot.py src/bot/scraper.py`.
+The development server binds to `127.0.0.1:5000` by default. `uv run` does not load `.env` unless `--env-file` is supplied.
 
-## Docker and Compose
+## Configuration
 
-1. Copy `.env.example` to `.env` and fill in `SLACK_WEBHOOK`.
-2. Create the external network expected by Compose if it does not already exist:
-   `docker network inspect bridge_server >/dev/null 2>&1 || docker network create bridge_server`.
-3. If Loki is attached to that network, set `LOKI_URL` to its push endpoint. Otherwise leave it empty.
-4. Build and start the service with `docker compose up --build -d`.
-5. Verify it with `curl --fail http://localhost:12025/health`.
-6. Stop it with `docker compose down`.
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `SLACK_WEBHOOK` | yes | none | Slack incoming webhook used for trend alerts. Startup fails when it is empty. |
+| `SCHEDULE_INTERVAL` | no | `10` | RSS poll interval in minutes; must be a positive integer. |
+| `SCRAPER_BACKEND` | no | `local` | `local` runs Chromium in this service; `remote` uses the Playwright job API. |
+| `PLAYWRIGHT_URL` | remote only | `http://localhost:3000` | Absolute base URL for the remote Playwright job API. |
+| `CONTROL_TOKEN` | no | none | Bearer token for `/start`, `/stop`, and `/reset`. Without it, protect those routes at the network layer. |
+| `LOKI_URL` | no | none | Loki push endpoint. Empty disables Loki output. |
+| `LOG_LEVEL` | no | `INFO` | Python log level. |
+| `LOG_FILE` | no | `./logs/bot.log` | Local log file path. |
+| `APP_NAME` | no | `google-trend-bot` | Application label used in logs. |
+| `APP_ENV` | no | `dev` | Environment label used in logs. |
+| `BIND_HOST` | no | `127.0.0.1` | Host used by the development server. |
+| `PORT` | no | `5000` | TCP port used by the development server; must be between 1 and 65535. |
+| `VERSION` | Compose only | `0.4.0` in `.env.example` | Container image tag. |
 
-- `Dockerfile` provides container fallback values for `LOG_LEVEL` and `SCHEDULE_INTERVAL`; `.env` remains the Compose runtime source of truth.
-- `docker-compose.yml` expects an `.env` file beside it, including `VERSION`, and publishes the app on port `12025`.
-- The container listens on port `5000` internally.
-- The container runs Gunicorn with one worker to keep the scheduler single-instance and four request threads so scraper calls do not block health and control requests.
+`USE_SERVER` was removed in version 0.4. Use `SCRAPER_BACKEND=local` or `SCRAPER_BACKEND=remote`.
 
-## Endpoints
+## Verification
 
-- `GET /health` returns `Healthy` and includes `X-Bot-Active: true|false` so
-  operators can distinguish HTTP process liveness from the RSS worker state.
-- `POST /start` returns `{"status":"success","state":"running"}` after starting the RSS bot.
-- `POST /stop` returns a success response with `state` set to `stopped` or `stopping`.
-- `POST /reset` clears old trend memory and returns `{"status":"success"}`.
-- `GET /trends` returns `{"status":"success","data":...}` on success. Errors use `{"status":"error","code":"...","message":"..."}` with a stable machine-readable code.
-- `GET /metrics` exposes Prometheus metrics.
+Run the same checks enforced by CI:
 
-All JSON error responses include a stable `code`; clients should branch on that code rather than matching the human-readable `message`.
+```bash
+uv sync --frozen --group dev
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest -q
+uv run python -m compileall -q src tests
+```
+
+`pip-audit` reports the Git-pinned `his-monitoring` package as unauditable because it is not published on PyPI. Its source revision is pinned in `pyproject.toml`; all registry packages must report zero known vulnerabilities.
+
+To apply the formatter locally:
+
+```bash
+uv run ruff format .
+```
+
+## HTTP API
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| `GET` | `/health` | Returns `Healthy`; `X-Bot-Active` reports the scheduler thread state. |
+| `POST` | `/start` | Starts the scheduler or returns `bot_already_running`. |
+| `POST` | `/stop` | Returns `stopped` or `stopping` when the bounded join times out. |
+| `POST` | `/reset` | Prunes titles older than the three-day memory window. |
+| `GET` | `/trends` | Returns the canonical scrape result. Upstream failures use stable error codes. |
+| `GET` | `/metrics` | Exposes Prometheus metrics. |
+
+When `CONTROL_TOKEN` is set, send `Authorization: Bearer <token>` to the three state-changing endpoints. Read-only endpoints remain open. Clients should branch on JSON `code`, not the human-readable `message`. Prometheus retains the existing `request_processing_seconds`, `completed_jobs_total`, and `get_trend_data_total` metric names for dashboard compatibility.
+
+## Docker Compose
+
+```bash
+cp .env.example .env
+# Set SLACK_WEBHOOK and VERSION in .env.
+
+docker network inspect bridge_server >/dev/null 2>&1 \
+  || docker network create bridge_server
+docker compose up --build -d
+docker compose ps
+docker compose down
+```
+
+Compose publishes the service at `http://localhost:12025`, adds a container health check, and uses an external `bridge_server` network. The image runs as a non-root user. Local scraping needs the Chromium dependencies installed in the image; remote scraping does not invoke the bundled browser.
+
+## Source map
+
+```text
+src/bot/trend_alert_bot.py       RSS scheduling, deduplication, Slack delivery
+src/bot/scraper.py               local/remote scraper selection
+src/clients/playwright_submit.py remote job protocol client
+src/common/                      API, RSS, scrape, and metrics contracts
+src/crawl_scripts/               Playwright crawler submitted locally or remotely
+src/main.py                      Flask routes and runtime assembly
+```

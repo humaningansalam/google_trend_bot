@@ -1,9 +1,12 @@
 .git
+.github
+.gstack
 .env
 .venv
 .pytest_cache
-.product-readiness-state.md
+.ruff_cache
+.coverage*
 **/__pycache__
 *.py[cod]
-downloads
+tests
 logs
